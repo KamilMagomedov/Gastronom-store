@@ -1,0 +1,33 @@
+### Orders list
+POST home-delivery-app-back.test/api/v1/auth/login
+Content-Type: application/json
+
+{
+    "email": "test@gmail.com",
+    "password": "password123"
+}
+
+
+### Orders list
+GET http://home-delivery-app-back.test/api/v1/orders?per_page=1
+Content-Type: application/json
+Authorization: Bearer 2|mSrJfXd2XRUXVu5Ae6UTYbvdWAKO0pKFpVxz29aJ9720ccc8
+
+### Orders list
+GET http://home-delivery-app-back.test/api/v1/orders/1
+Content-Type: application/json
+Authorization: Bearer 2|mSrJfXd2XRUXVu5Ae6UTYbvdWAKO0pKFpVxz29aJ9720ccc8\
+
+### Order create
+POST http://home-delivery-app-back.test/api/v1/orders
+Content-Type: application/json
+Authorization: Bearer 2|mSrJfXd2XRUXVu5Ae6UTYbvdWAKO0pKFpVxz29aJ9720ccc8
+
+{
+    "delivery_method": 1,
+    "delivery_address": "address",
+    "delivery_phone": "123123123123",
+    "delivery_notes": "some notes",
+    "payment_method": 1,
+    "notes": "notes"
+}

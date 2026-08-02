@@ -1,0 +1,32 @@
+includes:
+    - vendor/larastan/larastan/extension.neon
+
+parameters:
+    level: max
+    paths:
+        - app
+        - database
+        - routes
+
+    # исключаем папки, которые не хотим анализировать
+    excludePaths:
+        - storage
+        - bootstrap
+        - app/Filament/Resources/*/RelationManagers/*.php
+
+    # подавление ложных ошибок
+    ignoreErrors:
+        # Laravel Resources
+        - message: '#Access to an undefined property .*Resource::\$#'
+          paths:
+              - app/Http/Resources/**/*.php
+
+        # Filament RelationManagers
+        - message: '#Call to an undefined static method .*RelationManager::#'
+          paths:
+              - app/Filament/Resources/*/RelationManagers/*.php
+
+        # Стратегии с массивами
+        - message: '#Return type .* of method .* is not covariant with return type .*#'
+          paths:
+              - app/Services/StaticPage/Strategies/*.php

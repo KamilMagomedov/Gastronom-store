@@ -1,0 +1,12 @@
+### Home page frequently purchased
+GET home-delivery-app-back.test/api/v1/home/frequently-purchased
+Content-Type: application/json
+
+### Home page popular products
+GET home-delivery-app-back.test/api/v1/home/popular-products
+Content-Type: application/json
+
+
+### Home page categories
+GET home-delivery-app-back.test/api/v1/home/categories
+Content-Type: application/json

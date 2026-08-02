@@ -1,0 +1,17 @@
+### Get cart
+GET home-delivery-app-back.test/api/v1/carts?session_id=acf122a8-90d3-4bac-9bdf-192f2db9a888
+Authorization: Bearer 2|mSrJfXd2XRUXVu5Ae6UTYbvdWAKO0pKFpVxz29aJ9720ccc8
+Content-Type: application/json
+
+
+
+### Create cart
+POST home-delivery-app-back.test/api/v1/carts
+Authorization: Bearer 2|mSrJfXd2XRUXVu5Ae6UTYbvdWAKO0pKFpVxz29aJ9720ccc8
+Content-Type: application/json
+
+{
+    "product_id": 2,
+    "quantity": 10,
+    "session_id": "acf122a8-90d3-4bac-9bdf-192f2db9a888"
+}

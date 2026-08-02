@@ -1,0 +1,22 @@
+{
+	"name" : "Mobile APP",
+	"version" : "1.0.0",
+	"description" : "mobile API",
+	"title" : "Mobile APP public API",
+	"url" : "/api",
+	"sampleUrl" : "/api",
+	"header" : {
+		"title" : "",
+		"filename" : "header.md"
+	},
+	"footer" : {
+		"title" : "",
+		"filename" : "footer.md"
+	},
+	"template" : {
+		"forceLanguage" : "en",
+		"withCompare" : false,
+		"withGenerator" : false,
+		"showRequiredLabels" : true
+	}
+}

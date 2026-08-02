@@ -1,0 +1,11 @@
+{
+    "mcpServers": {
+        "laravel-boost": {
+            "command": "/Users/aleksandr/Library/Application Support/Herd/bin/php83",
+            "args": [
+                "/Users/aleksandr/PhpstormProjects/home-delivery-app-back/artisan",
+                "boost:mcp"
+            ]
+        }
+    }
+}
