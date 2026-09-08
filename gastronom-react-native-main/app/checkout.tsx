@@ -1,5 +1,5 @@
 import React from 'react';
-import { StyleSheet, View, Text, TouchableOpacity, TextInput, ScrollView, ImageBackground, Platform, KeyboardAvoidingView } from 'react-native';
+import { StyleSheet, View, Text, TouchableOpacity, TextInput, ScrollView, Platform, KeyboardAvoidingView, Alert } from 'react-native';
 import { useRouter } from 'expo-router';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { IconSymbol } from '@/components/ui/icon-symbol';
@@ -9,12 +9,14 @@ import { useCart } from '@/context/cart-context';
 import MobileMap from '@/components/MobileMap';
 import DeliveryDateTimePicker from '@/components/DeliveryDateTimePicker';
 import {ApiService} from '@/services/api';
+import { useAuth } from '@/context/auth-context';
 
 export default function CheckoutScreen() {
   const router = useRouter();
   const colorScheme = useColorScheme() ?? 'light';
   const colors = Colors[colorScheme];
   const { clearCart, cart, refresh } = useCart();
+  const { user } = useAuth();
   const items = cart?.items ?? [];
   const totalAmount = cart ? parseFloat(cart.total_amount) : 0;
   const totalItemsCount = items.reduce((sum, item) => sum + item.quantity, 0);
@@ -24,6 +26,7 @@ export default function CheckoutScreen() {
   const [apartment, setApartment] = React.useState('');
   const [entrance, setEntrance] = React.useState('');
   const [floor, setFloor] = React.useState('');
+  const [phone, setPhone] = React.useState('');
   const [comment, setComment] = React.useState('');
   const [debouncedAddress, setDebouncedAddress] = React.useState('');
   const [deliveryDate, setDeliveryDate] = React.useState<Date>(new Date());
@@ -68,37 +71,110 @@ export default function CheckoutScreen() {
   };
 
   const handlePay = async () => {
+    if (!user?.token) {
+      Alert.alert(
+        'Необходим вход',
+        'Войдите в аккаунт перед оформлением заказа.',
+      );
+      return;
+    }
+  
+    if (!city.trim()) {
+      Alert.alert('Ошибка', 'Введите город.');
+      return;
+    }
+  
+    if (!street.trim()) {
+      Alert.alert('Ошибка', 'Введите улицу и дом.');
+      return;
+    }
+  
+    const cleanPhone = phone.replace(/\D/g, '');
+  
+    if (cleanPhone.length < 10) {
+      Alert.alert('Ошибка', 'Введите корректный номер телефона.');
+      return;
+    }
+  
+    if (!settings?.delivery_methods?.length) {
+      Alert.alert('Ошибка', 'Не удалось получить способы доставки.');
+      return;
+    }
+  
+    if (!settings?.payment_methods?.length) {
+      Alert.alert('Ошибка', 'Не удалось получить способы оплаты.');
+      return;
+    }
+  
     try {
       const formattedDate = deliveryDate.toLocaleDateString('ru-RU', {
         day: 'numeric',
         month: 'long',
+        year: 'numeric',
       });
   
-      const fullAddress = [
-        city.trim(),
-        street.trim(),
-        apartment.trim() ? `кв. ${apartment.trim()}` : '',
-        entrance.trim() ? `подъезд ${entrance.trim()}` : '',
-        floor.trim() ? `этаж ${floor.trim()}` : ''
-      ].filter(Boolean).join(', ');
+      const courierMethod =
+        settings.delivery_methods.find((method: any) =>
+          method.label?.toLowerCase().includes('курьер'),
+        ) ?? settings.delivery_methods[0];
   
-      const generatedOrderId = Math.floor(10000 + Math.random() * 90000).toString();
+      const cashMethod =
+        settings.payment_methods.find((method: any) =>
+          method.name?.toLowerCase().includes('налич'),
+        ) ?? settings.payment_methods[0];
   
-      await clearCart(); 
-      if (refresh) await refresh();
+      const response = await ApiService.createOrder(
+        {
+          delivery_method: courierMethod.id,
+          payment_method: cashMethod.id,
+  
+          delivery_phone: `+${cleanPhone}`,
+  
+          delivery_city: city.trim(),
+          delivery_street: street.trim(),
+          delivery_apartment: apartment.trim() || undefined,
+          delivery_entrance: entrance.trim() || undefined,
+          delivery_floor: floor.trim() || undefined,
+  
+          delivery_notes: comment.trim() || undefined,
+  
+          notes: [
+            `Дата доставки: ${formattedDate}`,
+            `Время доставки: ${deliveryTime}`,
+          ].join('\n'),
+        },
+        user.token,
+      );
+  
+      const order = response.data;
+  
+      await refresh();
   
       router.push({
         pathname: '/order-success',
         params: {
-          orderId: generatedOrderId,
-          totalPrice: totalPrice.toFixed(0),
+          orderId: String(order.id),
+          totalPrice: String(order.total_amount),
           deliveryDate: formattedDate,
-          deliveryTime: deliveryTime,
-          address: fullAddress || 'Адрес не указан',
+          deliveryTime,
+          address:
+            order.delivery_address ||
+            `${city.trim()}, ${street.trim()}`,
         },
       });
-    } catch (error) {
-      console.error('Ошибка при обработке оплаты и очистке корзины:', error);
+    } catch (error: any) {
+      console.error('Checkout: create order error:', error);
+  
+      const validationMessages = error?.errors
+        ? Object.values(error.errors).flat().join('\n')
+        : null;
+  
+      Alert.alert(
+        'Не удалось оформить заказ',
+        validationMessages ||
+          error?.message ||
+          'Произошла ошибка при создании заказа.',
+      );
     }
   };
 
@@ -196,6 +272,28 @@ export default function CheckoutScreen() {
                   />
                 </View>
               </View>
+            </View>
+
+            <View style={styles.inputWrapper}>
+              <Text style={[styles.inputLabel, { color: colors.textSub }]}>
+                Телефон
+              </Text>
+
+              <TextInput
+                style={[
+                  styles.input,
+                  {
+                    backgroundColor: colors.surface,
+                    color: colors.text,
+                    borderColor: colors.border,
+                  },
+                ]}
+                value={phone}
+                onChangeText={setPhone}
+                placeholder="+7 999 123 45 67"
+                placeholderTextColor={colors.textSub}
+                keyboardType="phone-pad"
+              />
             </View>
           </View>
 

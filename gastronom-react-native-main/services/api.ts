@@ -180,25 +180,44 @@ export interface AppSettings {
 }
 
 export interface CreateOrderData {
-  delivery_method_id: number;
-  payment_method_id: number;
-  delivery_address?: string;
-  delivery_comment?: string;
-  contact_phone?: string;
-  contact_name?: string;
+  delivery_method: number;
+  payment_method: number;
+
+  delivery_phone?: string;
+  delivery_notes?: string;
+
+  delivery_street?: string;
+  delivery_city?: string;
+  delivery_apartment?: string;
+  delivery_postal_code?: string;
+  delivery_latitude?: number;
+  delivery_longitude?: number;
+  delivery_building?: string;
+  delivery_entrance?: string;
+  delivery_floor?: string;
+
+  notes?: string;
 }
 
 export interface ApiOrder {
   id: number;
   total_amount: string;
-  status: string;
-  payment_status: string;
-  created_at: string;
-  items: ApiCartItem[];
+  shipping_amount: string;
+  delivery_cost: string;
+
   delivery_method: DeliveryMethod;
   payment_method: PaymentMethod;
+
   delivery_address?: string;
-  delivery_comment?: string;
+  delivery_phone?: string;
+
+  payment_url?: string | null;
+
+  status: string;
+  payment_status: string;
+
+  delivered_at?: string | null;
+  created_at: string;
 }
 
 async function request<T>(

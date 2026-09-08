@@ -269,7 +269,7 @@ export default function NotificationsScreen() {
               </View>
               <Text style={[styles.emptyTitle, { color: colors.text }]}>Нет уведомлений</Text>
               <Text style={[styles.emptyText, { color: colors.textSub }]}>
-                В категории "{activeCategory}" пока ничего нет.
+                В категории «{activeCategory}» пока ничего нет.
               </Text>
             </View>
           )}

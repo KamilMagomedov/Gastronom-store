@@ -233,7 +233,6 @@ const styles = StyleSheet.create({
   },
   metaFooter: {
     marginTop: 12,
-    pt: 12,
     borderTopWidth: 1,
     flexDirection: 'row',
     alignItems: 'center',

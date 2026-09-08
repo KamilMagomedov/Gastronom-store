@@ -14,7 +14,7 @@ export default function VerifyCodeScreen() {
   const colorScheme = useColorScheme() ?? 'light';
   const colors = Colors[colorScheme];
   const [code, setCode] = useState(['', '', '', '']);
-  const inputs = useRef<TextInput[]>([]);
+  const inputs = useRef<Array<TextInput | null>>([]);
   const [timer, setTimer] = useState(59);
 
   useEffect(() => {
@@ -30,13 +30,13 @@ export default function VerifyCodeScreen() {
     setCode(newCode);
 
     if (text.length === 1 && index < 3) {
-      inputs.current[index + 1].focus();
+      inputs.current[index + 1]?.focus();
     }
   };
 
   const handleKeyPress = (e: any, index: number) => {
     if (e.nativeEvent.key === 'Backspace' && code[index] === '' && index > 0) {
-      inputs.current[index - 1].focus();
+      inputs.current[index - 1]?.focus();
     }
   };
 
@@ -80,7 +80,9 @@ export default function VerifyCodeScreen() {
             {code.map((digit, index) => (
               <TextInput
                 key={index}
-                ref={(ref) => (inputs.current[index] = ref as TextInput)}
+                ref={(ref) => {
+                  inputs.current[index] = ref;
+                }}
                 style={[
                   styles.codeInput,
                   { 
