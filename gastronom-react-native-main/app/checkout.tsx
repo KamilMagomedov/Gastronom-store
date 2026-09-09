@@ -32,7 +32,12 @@ export default function CheckoutScreen() {
   const [deliveryDate, setDeliveryDate] = React.useState<Date>(new Date());
   const [deliveryTime, setDeliveryTime] = React.useState<string>('09:00 - 13:00');
   const [settings, setSettings] = React.useState<any>(null);
+  const [selectedPaymentMethodId, setSelectedPaymentMethodId] = React.useState<number | null>(null);
+  const selectedPaymentMethod = settings?.payment_methods?.find(
+    (method: any) => method.id === selectedPaymentMethodId,
+  );
 
+  const isOnlinePayment = Boolean(selectedPaymentMethod?.acquirer);
   const mapUrl = `https://yandex.ru/map-widget/v1/?text=${encodeURIComponent(debouncedAddress)}&z=16`;
 
   React.useEffect(() => {
@@ -61,6 +66,15 @@ export default function CheckoutScreen() {
     return () => clearTimeout(timer);
   }, [city, street]);
 
+  React.useEffect(() => {
+    if (
+      settings?.payment_methods?.length &&
+      selectedPaymentMethodId === null
+    ) {
+      setSelectedPaymentMethodId(settings.payment_methods[0].id);
+    }
+  }, [settings, selectedPaymentMethodId]);
+
   const handleResetOrder = async () => {
     try {
       await clearCart();
@@ -68,6 +82,15 @@ export default function CheckoutScreen() {
     } catch (error) {
       console.error('Ошибка при сбросе заказа:', error);
     }
+  };
+
+  const showAlert = (title: string, message: string) => {
+    if (Platform.OS === 'web') {
+      window.alert(`${title}\n\n${message}`);
+      return;
+    }
+  
+    Alert.alert(title, message);
   };
 
   const handlePay = async () => {
@@ -92,7 +115,7 @@ export default function CheckoutScreen() {
     const cleanPhone = phone.replace(/\D/g, '');
   
     if (cleanPhone.length < 10) {
-      Alert.alert('Ошибка', 'Введите корректный номер телефона.');
+      showAlert('Ошибка', 'Введите корректный номер телефона.');
       return;
     }
   
@@ -112,21 +135,21 @@ export default function CheckoutScreen() {
         month: 'long',
         year: 'numeric',
       });
+
+      const paymentMethod =
+        settings.payment_methods.find(
+          (method: any) => method.id === selectedPaymentMethodId,
+        ) ?? settings.payment_methods[0];
   
       const courierMethod =
         settings.delivery_methods.find((method: any) =>
           method.label?.toLowerCase().includes('курьер'),
         ) ?? settings.delivery_methods[0];
   
-      const cashMethod =
-        settings.payment_methods.find((method: any) =>
-          method.name?.toLowerCase().includes('налич'),
-        ) ?? settings.payment_methods[0];
-  
       const response = await ApiService.createOrder(
         {
           delivery_method: courierMethod.id,
-          payment_method: cashMethod.id,
+          payment_method: paymentMethod.id,
   
           delivery_phone: `+${cleanPhone}`,
   
@@ -175,12 +198,24 @@ export default function CheckoutScreen() {
           error?.message ||
           'Произошла ошибка при создании заказа.',
       );
+
+      showAlert(
+        'Не удалось оформить заказ',
+        validationMessages ||
+          error?.message ||
+          'Произошла ошибка при создании заказа.',
+      );
     }
   };
 
-  const deliveryPrice = settings
-  ? (totalAmount >= parseFloat(settings.delivery_settings.free_delivery_threshold) ? 0 : parseFloat(settings.delivery_settings.delivery_fee))
-  : 0;
+  const selectedDeliveryMethod =
+  settings?.delivery_methods?.find((method: any) =>
+    method.label?.toLowerCase().includes('курьер'),
+  );
+
+  const deliveryPrice = selectedDeliveryMethod
+    ? Number(selectedDeliveryMethod.cost ?? 0)
+    : 0;
 
   const totalPrice = totalAmount + deliveryPrice;
 
@@ -275,8 +310,8 @@ export default function CheckoutScreen() {
             </View>
 
             <View style={styles.inputWrapper}>
-              <Text style={[styles.inputLabel, { color: colors.textSub }]}>
-                Телефон
+              <Text style={[styles.inputLabel, { color: colors.text }]}>
+                Телефон <Text style={{ color: '#e53935' }}>*</Text>
               </Text>
 
               <TextInput
@@ -294,6 +329,10 @@ export default function CheckoutScreen() {
                 placeholderTextColor={colors.textSub}
                 keyboardType="phone-pad"
               />
+
+              <Text style={[styles.requiredHint, { color: colors.textSub }]}>
+                Обязательное поле. Номер нужен для связи с курьером.
+              </Text>
             </View>
           </View>
 
@@ -308,31 +347,73 @@ export default function CheckoutScreen() {
           <View style={styles.section}>
             <Text style={[styles.sectionTitle, { color: colors.text, marginBottom: 16 }]}>Оплата</Text>
             <View style={styles.paymentOptions}>
-              <TouchableOpacity style={[styles.paymentCard, { backgroundColor: colorScheme === 'dark' ? 'rgba(19, 236, 91, 0.15)' : 'rgba(19, 236, 91, 0.1)', borderColor: colors.primary }]}>
-                <View style={styles.paymentInfo}>
-                  <View style={[styles.paymentIcon, { backgroundColor: colors.surface }]}>
-                    <IconSymbol name="creditcard" size={20} color={colors.primaryDark} />
-                  </View>
-                  <View>
-                    <Text style={[styles.paymentTitle, { color: colors.text }]}>Картой онлайн</Text>
-                    <Text style={[styles.paymentSub, { color: colors.textSub }]}>Mastercard •••• 4829</Text>
-                  </View>
-                </View>
-                <View style={[styles.radioSelected, { backgroundColor: colors.primary }]} />
-              </TouchableOpacity>
+              {settings?.payment_methods?.map((method: any) => {
+                const selected = selectedPaymentMethodId === method.id;
+                const isOnline = Boolean(method.acquirer);
 
-              <TouchableOpacity style={[styles.paymentCard, { backgroundColor: colors.surface, borderColor: colors.border }]}>
-                <View style={styles.paymentInfo}>
-                  <View style={[styles.paymentIcon, { backgroundColor: colors.background }]}>
-                    <IconSymbol name="banknote" size={20} color={colors.text} />
-                  </View>
-                  <View>
-                    <Text style={[styles.paymentTitle, { color: colors.text }]}>Наличкой</Text>
-                    <Text style={[styles.paymentSub, { color: colors.textSub }]}>При получении</Text>
-                  </View>
-                </View>
-                <View style={[styles.radioUnselected, { borderColor: colors.border }]} />
-              </TouchableOpacity>
+                return (
+                  <TouchableOpacity
+                    key={method.id}
+                    onPress={() => setSelectedPaymentMethodId(method.id)}
+                    style={[
+                      styles.paymentCard,
+                      {
+                        backgroundColor: selected
+                          ? colorScheme === 'dark'
+                            ? 'rgba(19, 236, 91, 0.15)'
+                            : 'rgba(19, 236, 91, 0.1)'
+                          : colors.surface,
+                        borderColor: selected ? colors.primary : colors.border,
+                      },
+                    ]}
+                  >
+                    <View style={styles.paymentInfo}>
+                      <View
+                        style={[
+                          styles.paymentIcon,
+                          { backgroundColor: colors.background },
+                        ]}
+                      >
+                        <IconSymbol
+                          name={isOnline ? 'creditcard' : 'banknote'}
+                          size={20}
+                          color={selected ? colors.primaryDark : colors.text}
+                        />
+                      </View>
+
+                      <View>
+                        <Text style={[styles.paymentTitle, { color: colors.text }]}>
+                          {method.name}
+                        </Text>
+
+                        {!!method.description && (
+                          <Text
+                            style={[styles.paymentSub, { color: colors.textSub }]}
+                          >
+                            {method.description}
+                          </Text>
+                        )}
+                      </View>
+                    </View>
+
+                    {selected ? (
+                      <View
+                        style={[
+                          styles.radioSelected,
+                          { backgroundColor: colors.primary },
+                        ]}
+                      />
+                    ) : (
+                      <View
+                        style={[
+                          styles.radioUnselected,
+                          { borderColor: colors.border },
+                        ]}
+                      />
+                    )}
+                  </TouchableOpacity>
+                );
+              })}
             </View>
           </View>
 
@@ -375,14 +456,17 @@ export default function CheckoutScreen() {
         </ScrollView>
       </KeyboardAvoidingView>
 
-      <View style={[styles.footer, { backgroundColor: colors.surface, borderTopColor: colors.border }]}>
-        <TouchableOpacity 
-          style={[styles.payButton, { backgroundColor: colors.primary }]}
-          onPress={handlePay}
-        >
-          <Text style={styles.payButtonText}>Оплатить {totalPrice.toFixed(0)} ₽</Text>
-        </TouchableOpacity>
-      </View>
+      <TouchableOpacity
+        style={[styles.payButton, { backgroundColor: colors.primary }]}
+        onPress={() => {
+          handlePay();
+        }}
+      >
+        <Text style={styles.payButtonText}>
+          {isOnlinePayment ? 'Оплатить' : 'Оформить заказ'}{' '}
+          {totalPrice.toFixed(0)} ₽
+        </Text>
+      </TouchableOpacity>
     </SafeAreaView>
   );
 }
@@ -609,5 +693,9 @@ const styles = StyleSheet.create({
     color: '#102216',
     fontSize: 18,
     fontWeight: '700',
+  },
+  requiredHint: {
+    fontSize: 12,
+    lineHeight: 16,
   },
 });

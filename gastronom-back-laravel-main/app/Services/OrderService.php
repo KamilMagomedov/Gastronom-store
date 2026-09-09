@@ -48,6 +48,7 @@ class OrderService
             ]);
 
             $this->createOrderItems($order, $cart->items);
+            $order->recalculateTotals();
             $this->decrementStock($cart->items);
 
             $cart->items()->delete();
