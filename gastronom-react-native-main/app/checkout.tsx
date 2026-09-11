@@ -145,6 +145,16 @@ export default function CheckoutScreen() {
         settings.delivery_methods.find((method: any) =>
           method.label?.toLowerCase().includes('курьер'),
         ) ?? settings.delivery_methods[0];
+
+      const fullDeliveryAddress = [
+        city.trim(),
+        street.trim(),
+        apartment.trim() ? `кв. ${apartment.trim()}` : null,
+        entrance.trim() ? `подъезд ${entrance.trim()}` : null,
+        floor.trim() ? `этаж ${floor.trim()}` : null,
+      ]
+        .filter(Boolean)
+        .join(', ');
   
       const response = await ApiService.createOrder(
         {
@@ -152,6 +162,8 @@ export default function CheckoutScreen() {
           payment_method: paymentMethod.id,
   
           delivery_phone: `+${cleanPhone}`,
+
+          delivery_address: fullDeliveryAddress,
   
           delivery_city: city.trim(),
           delivery_street: street.trim(),

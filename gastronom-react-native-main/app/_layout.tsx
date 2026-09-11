@@ -6,17 +6,13 @@ import { AuthProvider } from '@/context/auth-context';
 import { CartProvider } from '@/context/cart-context';
 import { ThemeProvider, useTheme } from '@/context/theme-context';
 
-export const unstable_settings = {
-  // Ensure that reloading on `/modal` keeps a back button present.
-  initialRouteName: 'splash',
-};
-
 function RootLayoutNav() {
   const { theme } = useTheme();
 
   return (
     <NavigationProvider value={theme === 'dark' ? DarkTheme : DefaultTheme}>
-      <Stack initialRouteName="splash">
+      <Stack>
+        <Stack.Screen name="index" options={{ headerShown: false }} />
         <Stack.Screen name="splash" options={{ headerShown: false }} />
         <Stack.Screen name="welcome" options={{ headerShown: false }} />
         <Stack.Screen name="signup" options={{ headerShown: false }} />

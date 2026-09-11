@@ -186,6 +186,8 @@ export interface CreateOrderData {
   delivery_phone?: string;
   delivery_notes?: string;
 
+  delivery_address?: string;
+
   delivery_street?: string;
   delivery_city?: string;
   delivery_apartment?: string;
@@ -199,14 +201,44 @@ export interface CreateOrderData {
   notes?: string;
 }
 
+export interface ApiOrderSummary {
+  image: string;
+  product_names: string;
+  items_count: number;
+  total_price: string;
+}
+
+export interface ApiOrderProduct {
+  id: number;
+  name: string;
+  slug: string;
+  price: string;
+  old_price: string | null;
+  sku: string;
+  unit: string;
+  image: string;
+
+  category?: {
+    id: number;
+    name: string;
+    slug: string;
+    image?: string;
+  };
+}
+
 export interface ApiOrder {
   id: number;
   total_amount: string;
-  shipping_amount: string;
+  shipping_amount: string | null;
   delivery_cost: string;
 
   delivery_method: DeliveryMethod;
-  payment_method: PaymentMethod;
+
+  payment_method: {
+    id: number;
+    label: string;
+    description: string;
+  };
 
   delivery_address?: string;
   delivery_phone?: string;
@@ -218,6 +250,21 @@ export interface ApiOrder {
 
   delivered_at?: string | null;
   created_at: string;
+
+  products?: ApiOrderProduct[];
+  order_summary?: ApiOrderSummary;
+}
+
+export interface ApiOrdersResponse {
+  data: ApiOrder[];
+  paginator: {
+    per_page: number;
+    current_page: number;
+    last_page: number;
+    total: number;
+    has_more: boolean;
+  };
+  success: boolean;
 }
 
 async function request<T>(
@@ -387,6 +434,35 @@ export class ApiService {
       body: JSON.stringify(orderData),
       headers: token ? { Authorization: `Bearer ${token}` } : {},
     });
+  }
+
+  static async getOrders(
+    token: string,
+    page = 1,
+    perPage = 20,
+  ): Promise<ApiOrdersResponse> {
+    return request<ApiOrdersResponse>(
+      `/v1/orders?page=${page}&per_page=${perPage}`,
+      {
+        headers: {
+          Authorization: `Bearer ${token}`,
+        },
+      },
+    );
+  }
+  
+  static async getOrder(
+    id: number | string,
+    token: string,
+  ): Promise<{ data: ApiOrder; success: boolean }> {
+    return request<{ data: ApiOrder; success: boolean }>(
+      `/v1/orders/${id}`,
+      {
+        headers: {
+          Authorization: `Bearer ${token}`,
+        },
+      },
+    );
   }
 
   static formatValidationErrors(error: ApiError): string[] {
