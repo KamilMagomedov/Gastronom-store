@@ -80,6 +80,15 @@ const STATUS_CONFIG: Record<
   },
 };
 
+const ORDER_TRACKING_STEPS = [
+  'pending',
+  'confirmed',
+  'preparing',
+  'ready',
+  'delivering',
+  'completed',
+] as const;
+
 const formatPrice = (value: string | number | null | undefined) => {
   const amount = Number(value ?? 0);
 
@@ -315,6 +324,14 @@ export default function OrderDetailScreen() {
     'preparing',
   ].includes(order.status);
 
+  const currentStepIndex = ORDER_TRACKING_STEPS.findIndex(
+    (step) => step === order.status,
+  );
+
+  const isInterrupted =
+    order.status === 'cancelled' ||
+    order.status === 'refunded';
+
   return (
     <ThemedView
       style={[
@@ -415,6 +432,144 @@ export default function OrderDetailScreen() {
                 {formatDate(order.created_at)}
               </ThemedText>
             </View>
+          </View>
+
+          <View style={styles.section}>
+            <ThemedText style={styles.sectionTitle}>
+              Статус заказа
+            </ThemedText>
+
+            {isInterrupted ? (
+              <View
+                style={[
+                  styles.interruptedCard,
+                  {
+                    backgroundColor: status.backgroundColor,
+                    borderColor: status.color,
+                  },
+                ]}
+              >
+                <ThemedText
+                  style={[
+                    styles.interruptedTitle,
+                    { color: status.color },
+                  ]}
+                >
+                  {status.label}
+                </ThemedText>
+
+                <ThemedText
+                  style={[
+                    styles.interruptedText,
+                    { color: colors.textSub },
+                  ]}
+                >
+                  {order.status === 'cancelled'
+                    ? 'Заказ отменён и больше не находится в доставке.'
+                    : 'Для заказа оформлен возврат.'}
+                </ThemedText>
+              </View>
+            ) : (
+              <View
+                style={[
+                  styles.trackingCard,
+                  {
+                    backgroundColor: colors.surface,
+                    borderColor: colors.border,
+                  },
+                ]}
+              >
+                {ORDER_TRACKING_STEPS.map((step, index) => {
+                  const isCompleted = index < currentStepIndex;
+                  const isCurrent = index === currentStepIndex;
+                  const isReached = isCompleted || isCurrent;
+
+                  return (
+                    <View
+                      key={step}
+                      style={styles.trackingStep}
+                    >
+                      <View style={styles.trackingIndicator}>
+                        <View
+                          style={[
+                            styles.trackingDot,
+                            {
+                              borderColor: isReached
+                                ? colors.primary
+                                : colors.border,
+                              backgroundColor: isCompleted
+                                ? colors.primary
+                                : colors.surface,
+                            },
+                          ]}
+                        >
+                          {isCompleted ? (
+                            <ThemedText
+                              style={styles.trackingCheck}
+                            >
+                              ✓
+                            </ThemedText>
+                          ) : isCurrent ? (
+                            <View
+                              style={[
+                                styles.trackingInnerDot,
+                                {
+                                  backgroundColor:
+                                    colors.primary,
+                                },
+                              ]}
+                            />
+                          ) : null}
+                        </View>
+
+                        {index <
+                          ORDER_TRACKING_STEPS.length - 1 && (
+                          <View
+                            style={[
+                              styles.trackingLine,
+                              {
+                                backgroundColor:
+                                  index < currentStepIndex
+                                    ? colors.primary
+                                    : colors.border,
+                              },
+                            ]}
+                          />
+                        )}
+                      </View>
+
+                      <View style={styles.trackingContent}>
+                        <ThemedText
+                          style={[
+                            styles.trackingLabel,
+                            {
+                              color: isReached
+                                ? colors.text
+                                : colors.textSub,
+                            },
+                          ]}
+                        >
+                          {STATUS_CONFIG[step].label}
+                        </ThemedText>
+
+                        {isCurrent && (
+                          <ThemedText
+                            style={[
+                              styles.trackingCurrent,
+                              {
+                                color: colors.primaryDark,
+                              },
+                            ]}
+                          >
+                            Текущий статус
+                          </ThemedText>
+                        )}
+                      </View>
+                    </View>
+                  );
+                })}
+              </View>
+            )}
           </View>
 
           <View style={styles.section}>
@@ -911,6 +1066,84 @@ const styles = StyleSheet.create({
     fontSize: 18,
     fontWeight: '700',
     marginBottom: 12,
+  },
+  trackingCard: {
+    padding: 16,
+    borderRadius: 16,
+    borderWidth: 1,
+  },
+
+  trackingStep: {
+    flexDirection: 'row',
+    minHeight: 58,
+  },
+
+  trackingIndicator: {
+    width: 28,
+    alignItems: 'center',
+  },
+
+  trackingDot: {
+    width: 18,
+    height: 18,
+    borderRadius: 9,
+    borderWidth: 2,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+
+  trackingInnerDot: {
+    width: 8,
+    height: 8,
+    borderRadius: 4,
+  },
+
+  trackingCheck: {
+    fontSize: 12,
+    lineHeight: 14,
+    fontWeight: '800',
+    color: '#102216',
+  },
+
+  trackingLine: {
+    width: 2,
+    flex: 1,
+    minHeight: 28,
+    marginVertical: 4,
+  },
+
+  trackingContent: {
+    flex: 1,
+    paddingLeft: 10,
+    paddingBottom: 16,
+  },
+
+  trackingLabel: {
+    fontSize: 15,
+    fontWeight: '600',
+  },
+
+  trackingCurrent: {
+    marginTop: 3,
+    fontSize: 12,
+    fontWeight: '600',
+  },
+
+  interruptedCard: {
+    padding: 16,
+    borderRadius: 16,
+    borderWidth: 1,
+  },
+
+  interruptedTitle: {
+    fontSize: 16,
+    fontWeight: '700',
+  },
+
+  interruptedText: {
+    marginTop: 6,
+    fontSize: 14,
+    lineHeight: 20,
   },
   itemsList: {
     gap: 12,

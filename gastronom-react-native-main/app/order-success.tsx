@@ -136,10 +136,34 @@ export default function OrderSuccessScreen() {
       </ScrollView>
 
       <View style={[styles.footer, { backgroundColor: colors.surface, borderTopColor: colors.border }]}>
-        <TouchableOpacity style={[styles.primaryButton, { backgroundColor: colors.primary }]}>
-          <IconSymbol name="paperplane.fill" size={20} color="#102216" />
-          <Text style={styles.primaryButtonText}>Отследить заказ</Text>
-        </TouchableOpacity>
+      <TouchableOpacity
+        style={[
+          styles.primaryButton,
+          { backgroundColor: colors.primary },
+        ]}
+        onPress={() => {
+          if (!orderId) {
+            return;
+          }
+
+          router.push({
+            pathname: '/order/[id]',
+            params: {
+              id: orderId,
+            },
+          });
+        }}
+      >
+        <IconSymbol
+          name="paperplane.fill"
+          size={20}
+          color="#102216"
+        />
+
+        <Text style={styles.primaryButtonText}>
+          Отследить заказ
+        </Text>
+      </TouchableOpacity>
         <TouchableOpacity 
           style={[styles.secondaryButton, { backgroundColor: colorScheme === 'dark' ? '#2a3e30' : '#f1f5f9' }]}
           onPress={() => router.replace('/(tabs)')}
