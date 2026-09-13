@@ -326,6 +326,12 @@ export default function OrderDetailScreen() {
     'preparing',
   ].includes(order.status);
 
+  const canRepeat = [
+    'completed',
+    'cancelled',
+    'refunded',
+  ].includes(order.status);
+
   const currentStepIndex = ORDER_TRACKING_STEPS.findIndex(
     (step) => step === order.status,
   );
@@ -930,30 +936,51 @@ export default function OrderDetailScreen() {
 
           <View style={styles.actionButtons}>
             <TouchableOpacity
-              style={styles.repeatButton}
-              onPress={() =>
-                router.push({
-                  pathname: '/repeat-order',
-                  params: {
-                    id: String(order.id),
-                  },
-                })
-              }
+              style={[
+                styles.homeButton,
+                {
+                  borderColor: colors.border,
+                  backgroundColor: colors.surface,
+                },
+              ]}
+              onPress={() => router.replace('/(tabs)')}
             >
               <IconSymbol
-                name="arrow.clockwise"
+                name="house.fill"
                 size={20}
-                color="#102216"
+                color={colors.text}
               />
 
-              <ThemedText
-                style={
-                  styles.repeatButtonText
-                }
-              >
-                Повторить заказ
+              <ThemedText style={styles.homeButtonText}>
+                На главную
               </ThemedText>
             </TouchableOpacity>
+
+            {canRepeat && (
+              <TouchableOpacity
+                style={styles.repeatButton}
+                onPress={() =>
+                  router.push({
+                    pathname: '/repeat-order',
+                    params: {
+                      id: String(order.id),
+                    },
+                  })
+                }
+              >
+                <IconSymbol
+                  name="arrow.clockwise"
+                  size={20}
+                  color="#102216"
+                />
+
+                <ThemedText
+                  style={styles.repeatButtonText}
+                >
+                  Повторить заказ
+                </ThemedText>
+              </TouchableOpacity>
+            )}
 
             {canCancel && (
               <TouchableOpacity
@@ -1258,6 +1285,19 @@ const styles = StyleSheet.create({
   actionButtons: {
     gap: 12,
     marginTop: 8,
+  },
+  homeButton: {
+    height: 56,
+    borderRadius: 16,
+    borderWidth: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 8,
+  },
+  homeButtonText: {
+    fontSize: 16,
+    fontWeight: '700',
   },
   repeatButton: {
     backgroundColor: '#13ec5b',

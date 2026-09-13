@@ -1,133 +1,667 @@
+import React, { useEffect, useState } from 'react';
+import {
+  ActivityIndicator,
+  ScrollView,
+  StyleSheet,
+  TouchableOpacity,
+  View,
+} from 'react-native';
+import {
+  Stack,
+  useLocalSearchParams,
+  useRouter,
+} from 'expo-router';
 
-import React from 'react';
-import { StyleSheet, TouchableOpacity, ScrollView, View } from 'react-native';
-import { Stack, useRouter } from 'expo-router';
 import { ThemedView } from '@/components/themed-view';
 import { ThemedText } from '@/components/themed-text';
 import { IconSymbol } from '@/components/ui/icon-symbol';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Colors } from '@/constants/theme';
 import { useColorScheme } from '@/hooks/use-color-scheme';
-
-const ORDER_TO_REPEAT = {
-  id: '2845',
-  date: '14 октября',
-  status: 'Доставлен',
-  store: 'ВкусВилл',
-  items: [
-    { id: '1', name: 'Авокадо Хасс', quantity: '2 шт', weight: '400 г', price: '240 ₽', icon: '🥑' },
-    { id: '2', name: 'Молоко 3.2%', quantity: '1 шт', weight: '900 мл', price: '89 ₽', icon: '🥛' },
-    { id: '3', name: 'Хлеб Бородинский', quantity: '1 шт', weight: '350 г', price: '54 ₽', icon: '🍞' },
-    { id: '4', name: 'Томаты черри', quantity: '1 уп', weight: '250 г', price: '180 ₽', icon: '🍅' },
-  ],
-  summary: {
-    subtotal: '563 ₽',
-    delivery: '0 ₽',
-    total: '563 ₽'
-  }
-};
+import { useAuth } from '@/context/auth-context';
+import {
+  ApiError,
+  ApiOrderRepeatCheck,
+  ApiService,
+} from '@/services/api';
 
 export default function RepeatOrderScreen() {
   const router = useRouter();
+
+  const { id } = useLocalSearchParams<{
+    id?: string | string[];
+  }>();
+
+  const orderId = Array.isArray(id) ? id[0] : id;
+
   const insets = useSafeAreaInsets();
   const colorScheme = useColorScheme() ?? 'light';
   const colors = Colors[colorScheme];
 
-  const handleRepeatOrder = () => {
-    router.push('/order-success');
+  const {
+    user,
+    isLoading: authLoading,
+  } = useAuth();
+
+  const [repeatCheck, setRepeatCheck] =
+    useState<ApiOrderRepeatCheck | null>(null);
+
+  const [loading, setLoading] = useState(true);
+  const [isRepeating, setIsRepeating] =
+    useState(false);
+
+  const [error, setError] =
+    useState<string | null>(null);
+
+  useEffect(() => {
+    if (authLoading) {
+      return;
+    }
+
+    if (!orderId || !user?.token) {
+      setError(
+        'Не удалось определить заказ.',
+      );
+      setLoading(false);
+      return;
+    }
+
+    let mounted = true;
+
+    const checkOrder = async () => {
+      setLoading(true);
+      setError(null);
+
+      try {
+        const response =
+          await ApiService.checkRepeatOrder(
+            orderId,
+            user.token,
+          );
+
+        if (mounted) {
+          setRepeatCheck(response.data);
+        }
+      } catch (checkError) {
+        console.error(
+          'Repeat order: failed to check order',
+          checkError,
+        );
+
+        const apiError =
+          checkError as ApiError;
+
+        if (mounted) {
+          setError(
+            apiError?.message ||
+              'Не удалось проверить заказ.',
+          );
+        }
+      } finally {
+        if (mounted) {
+          setLoading(false);
+        }
+      }
+    };
+
+    checkOrder();
+
+    return () => {
+      mounted = false;
+    };
+  }, [
+    authLoading,
+    orderId,
+    user?.token,
+  ]);
+
+  const formatPrice = (
+    value: number | string,
+  ) => {
+    const price = Number(value);
+
+    if (Number.isNaN(price)) {
+      return '—';
+    }
+
+    return `${price.toLocaleString(
+      'ru-RU',
+      {
+        minimumFractionDigits: 2,
+        maximumFractionDigits: 2,
+      },
+    )} ₽`;
+  };
+
+  const productsSubtotal =
+    repeatCheck?.available_items.reduce(
+      (sum, item) =>
+        sum +
+        Number(item.price) *
+          item.requested_quantity,
+      0,
+    ) ?? 0;
+
+  const handleRepeatOrder = async () => {
+    if (
+      !orderId ||
+      !user?.token ||
+      !repeatCheck?.can_repeat ||
+      isRepeating
+    ) {
+      return;
+    }
+
+    setIsRepeating(true);
+    setError(null);
+
+    try {
+      const response =
+        await ApiService.repeatOrder(
+          orderId,
+          user.token,
+        );
+
+      router.replace({
+        pathname: '/order/[id]',
+        params: {
+          id: String(response.data.id),
+        },
+      });
+    } catch (repeatError) {
+      console.error(
+        'Repeat order: failed to repeat order',
+        repeatError,
+      );
+
+      const apiError =
+        repeatError as ApiError;
+
+      setError(
+        apiError?.message ||
+          'Не удалось повторить заказ.',
+      );
+    } finally {
+      setIsRepeating(false);
+    }
   };
 
   return (
-    <ThemedView style={[styles.container, { paddingTop: insets.top, backgroundColor: colors.background }]}>
-      <Stack.Screen options={{ headerShown: false }} />
-      
-      {/* Header */}
-      <View style={[styles.header, { borderBottomColor: colors.border, backgroundColor: colors.background }]}>
-        <TouchableOpacity 
-            style={styles.backButton}
-            onPress={() => router.back()}
+    <ThemedView
+      style={[
+        styles.container,
+        {
+          paddingTop: insets.top,
+          backgroundColor:
+            colors.background,
+        },
+      ]}
+    >
+      <Stack.Screen
+        options={{ headerShown: false }}
+      />
+
+      <View
+        style={[
+          styles.header,
+          {
+            borderBottomColor:
+              colors.border,
+            backgroundColor:
+              colors.background,
+          },
+        ]}
+      >
+        <TouchableOpacity
+          style={styles.backButton}
+          onPress={() => router.back()}
         >
-          <IconSymbol name="chevron.left" size={28} color={colors.text} />
+          <IconSymbol
+            name="chevron.left"
+            size={28}
+            color={colors.text}
+          />
         </TouchableOpacity>
-        <ThemedText style={styles.headerTitle}>Повторить заказ</ThemedText>
+
+        <ThemedText
+          style={styles.headerTitle}
+        >
+          Повторить заказ
+        </ThemedText>
+
         <View style={{ width: 40 }} />
       </View>
 
-      <ScrollView 
-        contentContainerStyle={[styles.scrollContent, { paddingBottom: Math.max(insets.bottom, 24) }]}
-        showsVerticalScrollIndicator={false}
-      >
-        <View style={styles.content}>
-          {/* Order Brief */}
-          <View style={[styles.orderBrief, { backgroundColor: colors.surface, borderColor: colors.border }]}>
-            <View style={[styles.briefIconContainer, { backgroundColor: colorScheme === 'dark' ? colors.background : '#e0fdf0', borderColor: 'rgba(19, 236, 91, 0.2)' }]}>
-              <IconSymbol name="bag.fill" size={24} color={colorScheme === 'dark' ? '#13ec5b' : '#0fb847'} />
-            </View>
-            <View style={styles.briefInfo}>
-              <ThemedText style={styles.briefTitle}>Заказ от {ORDER_TO_REPEAT.date}</ThemedText>
-              <ThemedText style={[styles.briefSubtitle, { color: colors.textSub }]}>
-                {ORDER_TO_REPEAT.status} • {ORDER_TO_REPEAT.store}
-              </ThemedText>
-            </View>
-          </View>
+      {loading ? (
+        <View style={styles.stateContainer}>
+          <ActivityIndicator
+            size="large"
+            color="#13ec5b"
+          />
 
-          {/* Section Title */}
-          <View style={styles.sectionHeader}>
-            <ThemedText style={styles.sectionTitle}>Товары в заказе</ThemedText>
-            <ThemedText style={[styles.itemCount, { color: colors.textSub }]}>{ORDER_TO_REPEAT.items.length} товара</ThemedText>
-          </View>
-
-          {/* Items List */}
-          <View style={[styles.itemsContainer, { backgroundColor: colors.surface, borderColor: colors.border }]}>
-            {ORDER_TO_REPEAT.items.map((item, index) => (
-              <View 
-                key={item.id} 
-                style={[
-                  styles.itemRow, 
-                  index < ORDER_TO_REPEAT.items.length - 1 && { borderBottomColor: colors.border, borderBottomWidth: 1 }
-                ]}
-              >
-                <View style={[styles.itemIconBox, { backgroundColor: colorScheme === 'dark' ? colors.background : '#f0f4f2' }]}>
-                  <ThemedText style={styles.itemEmoji}>{item.icon}</ThemedText>
-                </View>
-                <View style={styles.itemMainInfo}>
-                  <ThemedText style={styles.itemName}>{item.name}</ThemedText>
-                  <ThemedText style={[styles.itemSpecs, { color: colors.textSub }]}>{item.quantity} • {item.weight}</ThemedText>
-                </View>
-                <ThemedText style={styles.itemPrice}>{item.price}</ThemedText>
-              </View>
-            ))}
-          </View>
-
-          {/* Price Summary */}
-          <View style={[styles.summaryCard, { backgroundColor: colors.surface, borderColor: colors.border }]}>
-            <View style={styles.summaryRow}>
-              <ThemedText style={[styles.summaryLabel, { color: colors.textSub }]}>Стоимость товаров</ThemedText>
-              <ThemedText style={styles.summaryValue}>{ORDER_TO_REPEAT.summary.subtotal}</ThemedText>
-            </View>
-            <View style={styles.summaryRow}>
-              <ThemedText style={[styles.summaryLabel, { color: colors.textSub }]}>Сборка и доставка</ThemedText>
-              <ThemedText style={styles.summaryValue}>{ORDER_TO_REPEAT.summary.delivery}</ThemedText>
-            </View>
-            <View style={[styles.divider, { backgroundColor: colors.border }]} />
-            <View style={styles.summaryRow}>
-              <ThemedText style={styles.totalLabel}>Итого</ThemedText>
-              <ThemedText style={styles.totalValue}>{ORDER_TO_REPEAT.summary.total}</ThemedText>
-            </View>
-          </View>
-
-          {/* Repeat Order Button inside ScrollView */}
-          <TouchableOpacity 
-            style={styles.repeatButton} 
-            activeOpacity={0.8}
-            onPress={handleRepeatOrder}
+          <ThemedText
+            style={[
+              styles.stateText,
+              { color: colors.textSub },
+            ]}
           >
-            <ThemedText style={styles.repeatButtonText}>Повторить заказ</ThemedText>
-            <View style={styles.dot} />
-            <ThemedText style={styles.repeatButtonText}>{ORDER_TO_REPEAT.summary.total}</ThemedText>
+            Проверяем товары...
+          </ThemedText>
+        </View>
+      ) : error && !repeatCheck ? (
+        <View style={styles.stateContainer}>
+          <ThemedText
+            style={styles.errorText}
+          >
+            {error}
+          </ThemedText>
+
+          <TouchableOpacity
+            style={styles.repeatButton}
+            onPress={() => router.back()}
+          >
+            <ThemedText
+              style={
+                styles.repeatButtonText
+              }
+            >
+              Вернуться назад
+            </ThemedText>
           </TouchableOpacity>
         </View>
-      </ScrollView>
+      ) : repeatCheck ? (
+        <ScrollView
+          contentContainerStyle={[
+            styles.scrollContent,
+            {
+              paddingBottom: Math.max(
+                insets.bottom,
+                24,
+              ),
+            },
+          ]}
+          showsVerticalScrollIndicator={
+            false
+          }
+        >
+          <View style={styles.content}>
+            <View
+              style={[
+                styles.orderBrief,
+                {
+                  backgroundColor:
+                    colors.surface,
+                  borderColor:
+                    colors.border,
+                },
+              ]}
+            >
+              <View
+                style={[
+                  styles.briefIconContainer,
+                  {
+                    backgroundColor:
+                      colorScheme === 'dark'
+                        ? colors.background
+                        : '#e0fdf0',
+                    borderColor:
+                      'rgba(19, 236, 91, 0.2)',
+                  },
+                ]}
+              >
+                <IconSymbol
+                  name="bag.fill"
+                  size={24}
+                  color={
+                    colorScheme === 'dark'
+                      ? '#13ec5b'
+                      : '#0fb847'
+                  }
+                />
+              </View>
+
+              <View
+                style={styles.briefInfo}
+              >
+                <ThemedText
+                  style={styles.briefTitle}
+                >
+                  Заказ #{repeatCheck.order_id}
+                </ThemedText>
+
+                <ThemedText
+                  style={[
+                    styles.briefSubtitle,
+                    {
+                      color: repeatCheck.can_repeat
+                        ? '#059669'
+                        : '#dc2626',
+                    },
+                  ]}
+                >
+                  {repeatCheck.can_repeat
+                    ? 'Все товары доступны'
+                    : `Недоступно товаров: ${repeatCheck.total_unavailable_items}`}
+                </ThemedText>
+              </View>
+            </View>
+
+            <View
+              style={styles.sectionHeader}
+            >
+              <ThemedText
+                style={styles.sectionTitle}
+              >
+                Доступные товары
+              </ThemedText>
+
+              <ThemedText
+                style={[
+                  styles.itemCount,
+                  {
+                    color: colors.textSub,
+                  },
+                ]}
+              >
+                {
+                  repeatCheck.total_available_items
+                }
+              </ThemedText>
+            </View>
+
+            <View
+              style={[
+                styles.itemsContainer,
+                {
+                  backgroundColor:
+                    colors.surface,
+                  borderColor:
+                    colors.border,
+                },
+              ]}
+            >
+              {repeatCheck.available_items.map(
+                (item, index) => (
+                  <View
+                    key={item.id}
+                    style={[
+                      styles.itemRow,
+                      index <
+                        repeatCheck
+                          .available_items
+                          .length -
+                          1 && {
+                        borderBottomColor:
+                          colors.border,
+                        borderBottomWidth: 1,
+                      },
+                    ]}
+                  >
+                    <View
+                      style={[
+                        styles.itemIconBox,
+                        {
+                          backgroundColor:
+                            colorScheme ===
+                            'dark'
+                              ? colors.background
+                              : '#f0f4f2',
+                        },
+                      ]}
+                    >
+                      <IconSymbol
+                        name="bag.fill"
+                        size={24}
+                        color="#0fb847"
+                      />
+                    </View>
+
+                    <View
+                      style={
+                        styles.itemMainInfo
+                      }
+                    >
+                      <ThemedText
+                        style={
+                          styles.itemName
+                        }
+                      >
+                        {item.product_name}
+                      </ThemedText>
+
+                      <ThemedText
+                        style={[
+                          styles.itemSpecs,
+                          {
+                            color:
+                              colors.textSub,
+                          },
+                        ]}
+                      >
+                        {
+                          item.requested_quantity
+                        }{' '}
+                        ×{' '}
+                        {formatPrice(
+                          item.price,
+                        )}{' '}
+                        / {item.unit}
+                      </ThemedText>
+                    </View>
+
+                    <ThemedText
+                      style={styles.itemPrice}
+                    >
+                      {formatPrice(
+                        Number(item.price) *
+                          item.requested_quantity,
+                      )}
+                    </ThemedText>
+                  </View>
+                ),
+              )}
+            </View>
+
+            {repeatCheck.unavailable_items
+              .length > 0 && (
+              <>
+                <View
+                  style={
+                    styles.sectionHeader
+                  }
+                >
+                  <ThemedText
+                    style={
+                      styles.sectionTitle
+                    }
+                  >
+                    Недоступные товары
+                  </ThemedText>
+
+                  <ThemedText
+                    style={[
+                      styles.itemCount,
+                      { color: '#dc2626' },
+                    ]}
+                  >
+                    {
+                      repeatCheck
+                        .total_unavailable_items
+                    }
+                  </ThemedText>
+                </View>
+
+                <View
+                  style={[
+                    styles.itemsContainer,
+                    {
+                      backgroundColor:
+                        colors.surface,
+                      borderColor:
+                        colors.border,
+                    },
+                  ]}
+                >
+                  {repeatCheck.unavailable_items.map(
+                    (item, index) => (
+                      <View
+                        key={item.id}
+                        style={[
+                          styles.itemRow,
+                          index <
+                            repeatCheck
+                              .unavailable_items
+                              .length -
+                              1 && {
+                            borderBottomColor:
+                              colors.border,
+                            borderBottomWidth: 1,
+                          },
+                        ]}
+                      >
+                        <View
+                          style={[
+                            styles.itemIconBox,
+                            {
+                              backgroundColor:
+                                colorScheme ===
+                                'dark'
+                                  ? colors.background
+                                  : '#fef2f2',
+                            },
+                          ]}
+                        >
+                          <IconSymbol
+                            name="xmark"
+                            size={22}
+                            color="#dc2626"
+                          />
+                        </View>
+
+                        <View
+                          style={
+                            styles.itemMainInfo
+                          }
+                        >
+                          <ThemedText
+                            style={
+                              styles.itemName
+                            }
+                          >
+                            {
+                              item.product_name
+                            }
+                          </ThemedText>
+
+                          <ThemedText
+                            style={[
+                              styles.itemSpecs,
+                              {
+                                color:
+                                  '#dc2626',
+                              },
+                            ]}
+                          >
+                            Недоступно для
+                            повторного заказа
+                          </ThemedText>
+                        </View>
+                      </View>
+                    ),
+                  )}
+                </View>
+              </>
+            )}
+
+            <View
+              style={[
+                styles.summaryCard,
+                {
+                  backgroundColor:
+                    colors.surface,
+                  borderColor:
+                    colors.border,
+                },
+              ]}
+            >
+              <View
+                style={styles.summaryRow}
+              >
+                <ThemedText
+                  style={[
+                    styles.summaryLabel,
+                    {
+                      color: colors.textSub,
+                    },
+                  ]}
+                >
+                  Товары по актуальным ценам
+                </ThemedText>
+
+                <ThemedText
+                  style={styles.summaryValue}
+                >
+                  {formatPrice(
+                    productsSubtotal,
+                  )}
+                </ThemedText>
+              </View>
+
+              <ThemedText
+                style={[
+                  styles.infoText,
+                  { color: colors.textSub },
+                ]}
+              >
+                Стоимость доставки и итоговая
+                сумма будут рассчитаны при
+                создании нового заказа.
+              </ThemedText>
+            </View>
+
+            {error ? (
+              <ThemedText
+                style={styles.errorText}
+              >
+                {error}
+              </ThemedText>
+            ) : null}
+
+            <TouchableOpacity
+              style={[
+                styles.repeatButton,
+                (!repeatCheck.can_repeat ||
+                  isRepeating) && {
+                  opacity: 0.5,
+                },
+              ]}
+              activeOpacity={0.8}
+              disabled={
+                !repeatCheck.can_repeat ||
+                isRepeating
+              }
+              onPress={handleRepeatOrder}
+            >
+              {isRepeating ? (
+                <ActivityIndicator
+                  size="small"
+                  color="#102216"
+                />
+              ) : (
+                <ThemedText
+                  style={
+                    styles.repeatButtonText
+                  }
+                >
+                  {repeatCheck.can_repeat
+                    ? 'Повторить заказ'
+                    : 'Повторить заказ невозможно'}
+                </ThemedText>
+              )}
+            </TouchableOpacity>
+          </View>
+        </ScrollView>
+      ) : null}
     </ThemedView>
   );
 }
@@ -304,5 +838,26 @@ const styles = StyleSheet.create({
     backgroundColor: '#111813',
     marginHorizontal: 4,
     opacity: 0.4,
+  },
+  stateContainer: {
+    flex: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
+    padding: 24,
+    gap: 12,
+  },
+  stateText: {
+    fontSize: 14,
+    fontWeight: '500',
+  },
+  errorText: {
+    color: '#dc2626',
+    fontSize: 14,
+    lineHeight: 20,
+    textAlign: 'center',
+  },
+  infoText: {
+    fontSize: 13,
+    lineHeight: 19,
   },
 });

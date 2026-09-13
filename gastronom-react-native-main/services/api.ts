@@ -330,6 +330,40 @@ async function request<T>(
   }
 }
 
+export interface ApiOrderRepeatItem {
+  id: number;
+  product_id: number;
+  product_name: string;
+  product_slug: string;
+  product_sku: string;
+  product_image: string;
+  requested_quantity: number;
+  available_quantity: number;
+  price: string;
+  old_price: string | null;
+  unit: string;
+  is_available: boolean;
+  shortage: number;
+}
+
+export interface ApiOrderRepeatUnavailableItem {
+  id: number;
+  product_id: number;
+  product_name: string;
+  product_sku: string;
+  requested_quantity: number;
+  reason: string;
+}
+
+export interface ApiOrderRepeatCheck {
+  order_id: number;
+  available_items: ApiOrderRepeatItem[];
+  unavailable_items: ApiOrderRepeatUnavailableItem[];
+  can_repeat: boolean;
+  total_available_items: number;
+  total_unavailable_items: number;
+}
+
 export class ApiService {
   static async register(data: RegistrationData): Promise<AuthResponse> {
     return request<AuthResponse>('/v1/auth/register', {
@@ -496,6 +530,48 @@ export class ApiService {
         },
       },
     );
+  }
+
+  static async checkRepeatOrder(
+    orderId: number | string,
+    token: string,
+  ): Promise<{
+    data: ApiOrderRepeatCheck;
+    success: boolean;
+  }> {
+    return request<{
+      data: ApiOrderRepeatCheck;
+      success: boolean;
+    }>('/v1/orders-repeat/check', {
+      method: 'POST',
+      body: JSON.stringify({
+        order_id: Number(orderId),
+      }),
+      headers: {
+        Authorization: `Bearer ${token}`,
+      },
+    });
+  }
+
+  static async repeatOrder(
+    orderId: number | string,
+    token: string,
+  ): Promise<{
+    data: ApiOrder;
+    success: boolean;
+  }> {
+    return request<{
+      data: ApiOrder;
+      success: boolean;
+    }>('/v1/orders-repeat', {
+      method: 'POST',
+      body: JSON.stringify({
+        order_id: Number(orderId),
+      }),
+      headers: {
+        Authorization: `Bearer ${token}`,
+      },
+    });
   }
 
   static formatValidationErrors(error: ApiError): string[] {

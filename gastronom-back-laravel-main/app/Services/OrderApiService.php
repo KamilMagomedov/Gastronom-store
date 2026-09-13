@@ -199,55 +199,126 @@ class OrderApiService
         $checkResult = $this->checkOrderForRepeat($orderId);
 
         if (! $checkResult['can_repeat']) {
-            throw new InvalidOrderStatusException('Order cannot be repeated: some items are unavailable', 422);
+            throw new InvalidOrderStatusException(
+                'Order cannot be repeated: some items are unavailable',
+                422
+            );
         }
 
         $originalOrder = $checkResult['order'];
 
+        if (! in_array($originalOrder->status, [
+            'completed',
+            'cancelled',
+            'refunded',
+        ], true)) {
+            throw new InvalidOrderStatusException(
+                'Order cannot be repeated at current status',
+                422
+            );
+        }
+
         return DB::transaction(function () use ($originalOrder, $checkResult) {
+            $deliveryCost = DeliveryMethod::find(
+                $originalOrder->delivery_method_id
+            )?->cost ?? 0.00;
+
             $newOrder = $this->orderRepository->create([
                 'customer_id' => $originalOrder->customer_id,
-                'delivery_method_id' => $originalOrder->delivery_method_id,
-                'delivery_address' => $originalOrder->delivery_address,
-                'delivery_phone' => $originalOrder->delivery_phone,
-                'delivery_notes' => $originalOrder->delivery_notes,
-                'delivery_street' => $originalOrder->delivery_street,
-                'delivery_city' => $originalOrder->delivery_city,
-                'delivery_apartment' => $originalOrder->delivery_apartment,
-                'delivery_postal_code' => $originalOrder->delivery_postal_code,
-                'delivery_latitude' => $originalOrder->delivery_latitude,
-                'delivery_longitude' => $originalOrder->delivery_longitude,
-                'delivery_building' => $originalOrder->delivery_building,
-                'delivery_entrance' => $originalOrder->delivery_entrance,
-                'delivery_floor' => $originalOrder->delivery_floor,
-                'payment_method_id' => $originalOrder->payment_method_id,
-                'notes' => $originalOrder->notes,
-                'subtotal' => $originalOrder->subtotal,
-                'total_amount' => $originalOrder->total_amount,
-                'shipping_amount' => $originalOrder->shipping_amount,
-                'delivery_cost' => $originalOrder->delivery_cost,
+
+                'delivery_method_id' =>
+                    $originalOrder->delivery_method_id,
+
+                'delivery_address' =>
+                    $originalOrder->delivery_address,
+
+                'delivery_phone' =>
+                    $originalOrder->delivery_phone,
+
+                'delivery_notes' =>
+                    $originalOrder->delivery_notes,
+
+                'delivery_street' =>
+                    $originalOrder->delivery_street,
+
+                'delivery_city' =>
+                    $originalOrder->delivery_city,
+
+                'delivery_apartment' =>
+                    $originalOrder->delivery_apartment,
+
+                'delivery_postal_code' =>
+                    $originalOrder->delivery_postal_code,
+
+                'delivery_latitude' =>
+                    $originalOrder->delivery_latitude,
+
+                'delivery_longitude' =>
+                    $originalOrder->delivery_longitude,
+
+                'delivery_building' =>
+                    $originalOrder->delivery_building,
+
+                'delivery_entrance' =>
+                    $originalOrder->delivery_entrance,
+
+                'delivery_floor' =>
+                    $originalOrder->delivery_floor,
+
+                'payment_method_id' =>
+                    $originalOrder->payment_method_id,
+
+                'notes' => null,
+
+                'subtotal' => 0,
+                'total_amount' => $deliveryCost,
+                'shipping_amount' => 0,
+                'delivery_cost' => $deliveryCost,
+
                 'status' => 'pending',
                 'payment_status' => 'pending',
             ]);
 
-            // Create order items and update stock quantities
             foreach ($checkResult['available_items'] as $orderItem) {
                 $product = $orderItem->product;
 
-                $this->orderRepository->createOrderItem($newOrder, [
-                    'product_id' => $orderItem->product_id,
-                    'product_name' => $orderItem->product_name,
-                    'product_sku' => $orderItem->product_sku,
-                    'quantity' => $orderItem->quantity,
-                    'unit_price' => $product->price,
-                    'total_price' => $orderItem->quantity * $product->price,
-                ]);
+                $this->orderRepository->createOrderItem(
+                    $newOrder,
+                    [
+                        'product_id' =>
+                            $orderItem->product_id,
 
-                // Update stock quantity using Product model
-                $product->decrement('stock_quantity', $orderItem->quantity);
+                        'product_name' =>
+                            $orderItem->product_name,
+
+                        'product_sku' =>
+                            $orderItem->product_sku,
+
+                        'quantity' =>
+                            $orderItem->quantity,
+
+                        'unit_price' =>
+                            $product->price,
+
+                        'total_price' =>
+                            $orderItem->quantity *
+                            $product->price,
+                    ]
+                );
+
+                $product->decrement(
+                    'stock_quantity',
+                    $orderItem->quantity
+                );
             }
 
-            return $newOrder->fresh(['orderItems.product']);
+            $newOrder->recalculateTotals();
+
+            return $newOrder->fresh([
+                'orderItems.product',
+                'deliveryMethod',
+                'paymentMethod',
+            ]);
         });
     }
 }
