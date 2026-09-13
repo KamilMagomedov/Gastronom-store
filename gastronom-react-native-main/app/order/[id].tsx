@@ -131,6 +131,14 @@ export default function OrderDetailScreen() {
   const [error, setError] =
     useState<string | null>(null);
 
+  const handleBack = () => {
+    if (router.canGoBack()) {
+      router.back();
+    } else {
+      router.replace('/orders');
+    }
+  };
+
   useEffect(() => {
     if (authLoading) {
       return;
@@ -238,7 +246,7 @@ export default function OrderDetailScreen() {
         >
           <TouchableOpacity
             style={styles.backButton}
-            onPress={() => router.back()}
+            onPress={handleBack}
           >
             <IconSymbol
               name="chevron.left"
@@ -285,6 +293,11 @@ export default function OrderDetailScreen() {
 
   const products = order.products ?? [];
 
+  const totalItemsCount = products.reduce(
+    (sum, product) => sum + (product.quantity || 1),
+    0,
+  );
+
   const total = Number(order.total_amount ?? 0);
 
   const deliveryCost = Number(
@@ -327,7 +340,7 @@ export default function OrderDetailScreen() {
       >
         <TouchableOpacity
           style={styles.backButton}
-          onPress={() => router.back()}
+          onPress={handleBack}
         >
           <IconSymbol
             name="chevron.left"
@@ -408,7 +421,7 @@ export default function OrderDetailScreen() {
             <ThemedText
               style={styles.sectionTitle}
             >
-              Товары ({products.length})
+              Товары ({totalItemsCount})
             </ThemedText>
 
             <View style={styles.itemsList}>
@@ -463,21 +476,19 @@ export default function OrderDetailScreen() {
                       style={[
                         styles.itemDesc,
                         {
-                          color:
-                            colors.textSub,
+                          color: colors.textSub,
                         },
                       ]}
                     >
-                      {product.unit}
+                      {product.quantity} × {formatPrice(product.unit_price)}
+                      {product.unit ? ` / ${product.unit}` : ''}
                     </ThemedText>
                   </View>
 
                   <ThemedText
                     style={styles.itemPrice}
                   >
-                    {formatPrice(
-                      product.price,
-                    )}
+                    {formatPrice(product.total_price)}
                   </ThemedText>
                 </View>
               ))}
@@ -622,6 +633,53 @@ export default function OrderDetailScreen() {
                   </View>
                 </View>
               </View>
+              {order.delivery_notes?.trim() ? (
+                  <>
+                    <View
+                      style={[
+                        styles.divider,
+                        {
+                          backgroundColor: colors.border,
+                          marginVertical: 16,
+                        },
+                      ]}
+                    />
+
+                    <View style={styles.deliveryRow}>
+                      <View
+                        style={[
+                          styles.deliveryIcon,
+                          {
+                            backgroundColor: 'rgba(19, 236, 91, 0.15)',
+                          },
+                        ]}
+                      >
+                        <IconSymbol
+                          name="info.circle.fill"
+                          size={20}
+                          color="#059669"
+                        />
+                      </View>
+
+                      <View style={styles.deliveryInfo}>
+                        <ThemedText
+                          style={[
+                            styles.deliveryLabel,
+                            {
+                              color: colors.textSub,
+                            },
+                          ]}
+                        >
+                          КОММЕНТАРИЙ КУРЬЕРУ
+                        </ThemedText>
+
+                        <ThemedText style={styles.deliveryValue}>
+                          {order.delivery_notes}
+                        </ThemedText>
+                      </View>
+                    </View>
+                  </>
+                ) : null}
             </View>
           </View>
 

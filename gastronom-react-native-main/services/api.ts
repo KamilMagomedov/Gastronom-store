@@ -224,6 +224,10 @@ export interface ApiOrderProduct {
     slug: string;
     image?: string;
   };
+
+  quantity: number;
+  unit_price: string;
+  total_price: string;
 }
 
 export interface ApiOrder {
@@ -240,7 +244,7 @@ export interface ApiOrder {
     description: string;
   };
 
-  delivery_address?: string;
+  delivery_address?: string | null;
   delivery_phone?: string;
 
   payment_url?: string | null;
@@ -253,6 +257,16 @@ export interface ApiOrder {
 
   products?: ApiOrderProduct[];
   order_summary?: ApiOrderSummary;
+
+  delivery_notes?: string | null;
+
+  delivery_city?: string | null;
+  delivery_street?: string | null;
+  delivery_building?: string | null;
+  delivery_apartment?: string | null;
+  delivery_entrance?: string | null;
+  delivery_floor?: string | null;
+  delivery_postal_code?: string | null;
 }
 
 export interface ApiOrdersResponse {
