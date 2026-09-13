@@ -1,4 +1,5 @@
-import React, { useEffect, useState } from 'react';
+import React, { useCallback, useState } from 'react';
+import { useFocusEffect } from '@react-navigation/native';
 
 import {
   ActivityIndicator,
@@ -148,61 +149,62 @@ export default function OrderDetailScreen() {
     }
   };
 
-  useEffect(() => {
-    if (authLoading) {
-      return;
-    }
+  useFocusEffect(
+    useCallback(() => {
+      if (authLoading) {
+        return;
+      }
 
-    if (!user?.token || !orderId) {
-      setError('Не удалось определить заказ.');
-      setLoading(false);
-      return;
-    }
+      if (!user?.token || !orderId) {
+        setError('Не удалось определить заказ.');
+        setLoading(false);
+        return;
+      }
 
-    let mounted = true;
+      let mounted = true;
 
-    const loadOrder = async () => {
-      setLoading(true);
-      setError(null);
+      const loadOrder = async () => {
+        setLoading(true);
+        setError(null);
 
-      try {
-        const response =
-          await ApiService.getOrder(
+        try {
+          const response = await ApiService.getOrder(
             orderId,
             user.token,
           );
 
-        if (mounted) {
-          setOrder(response.data);
-        }
-      } catch (loadError) {
-        console.error(
-          'Order details: failed to load order',
-          loadError,
-        );
-
-        if (mounted) {
-          setError(
-            'Не удалось загрузить данные заказа.',
+          if (mounted) {
+            setOrder(response.data);
+          }
+        } catch (loadError) {
+          console.error(
+            'Order details: failed to load order',
+            loadError,
           );
-        }
-      } finally {
-        if (mounted) {
-          setLoading(false);
-        }
-      }
-    };
 
-    loadOrder();
+          if (mounted) {
+            setError(
+              'Не удалось загрузить данные заказа.',
+            );
+          }
+        } finally {
+          if (mounted) {
+            setLoading(false);
+          }
+        }
+      };
 
-    return () => {
-      mounted = false;
-    };
-  }, [
-    authLoading,
-    orderId,
-    user?.token,
-  ]);
+      loadOrder();
+
+      return () => {
+        mounted = false;
+      };
+    }, [
+      authLoading,
+      orderId,
+      user?.token,
+    ]),
+  );
 
   if (loading) {
     return (

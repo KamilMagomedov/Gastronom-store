@@ -479,6 +479,25 @@ export class ApiService {
     );
   }
 
+  static async cancelOrder(
+    id: number | string,
+    reason: string | null,
+    token: string,
+  ): Promise<{ success: boolean }> {
+    return request<{ success: boolean }>(
+      `/v1/orders/${id}/cancel`,
+      {
+        method: 'PUT',
+        body: JSON.stringify({
+          reason,
+        }),
+        headers: {
+          Authorization: `Bearer ${token}`,
+        },
+      },
+    );
+  }
+
   static formatValidationErrors(error: ApiError): string[] {
     const errors: string[] = [];
 

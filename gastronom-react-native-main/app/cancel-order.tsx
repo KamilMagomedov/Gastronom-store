@@ -1,6 +1,13 @@
 
 import React, { useState } from 'react';
-import { StyleSheet, TouchableOpacity, ScrollView, View, TextInput } from 'react-native';
+import {
+  ActivityIndicator,
+  StyleSheet,
+  TouchableOpacity,
+  ScrollView,
+  View,
+  TextInput,
+} from 'react-native';
 import { Stack, useRouter, useLocalSearchParams } from 'expo-router';
 import { ThemedView } from '@/components/themed-view';
 import { ThemedText } from '@/components/themed-text';
@@ -8,6 +15,8 @@ import { IconSymbol } from '@/components/ui/icon-symbol';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Colors } from '@/constants/theme';
 import { useColorScheme } from '@/hooks/use-color-scheme';
+import { useAuth } from '@/context/auth-context';
+import { ApiError, ApiService } from '@/services/api';
 
 const CANCEL_REASONS = [
   'Передумал(а) покупать',
@@ -18,25 +27,66 @@ const CANCEL_REASONS = [
 
 export default function CancelOrderScreen() {
   const router = useRouter();
-  const { id } = useLocalSearchParams();
+  const { id } = useLocalSearchParams<{
+    id?: string | string[];
+  }>();
+
+  const orderId = Array.isArray(id) ? id[0] : id;
   const insets = useSafeAreaInsets();
   const colorScheme = useColorScheme() ?? 'light';
   const colors = Colors[colorScheme];
+  const { user } = useAuth();
   const [selectedReason, setSelectedReason] = useState(CANCEL_REASONS[0]);
   const [comment, setComment] = useState('');
+  const [isCancelling, setIsCancelling] = useState(false);
+  const [error, setError] = useState<string | null>(null);
 
-  const handleCancel = () => {
-    // Here you would typically call an API to cancel the order
-    router.back();
+  const handleCancel = async () => {
+    if (!orderId || !user?.token || isCancelling) {
+      return;
+    }
+
+    const trimmedComment = comment.trim();
+
+    const reason = trimmedComment
+      ? `${selectedReason}: ${trimmedComment}`
+      : selectedReason;
+
+    setIsCancelling(true);
+    setError(null);
+
+    try {
+      await ApiService.cancelOrder(
+        orderId,
+        reason,
+        user.token,
+      );
+
+      router.back();
+    } catch (cancelError) {
+      console.error(
+        'Cancel order: failed to cancel order',
+        cancelError,
+      );
+
+      const apiError = cancelError as ApiError;
+
+      setError(
+        apiError?.message ||
+          'Не удалось отменить заказ. Возможно, его статус уже изменился.',
+      );
+    } finally {
+      setIsCancelling(false);
+    }
   };
 
   return (
     <ThemedView style={[styles.container, { paddingTop: insets.top }]}>
       <Stack.Screen options={{ headerShown: false }} />
-      
+
       {/* Header */}
       <View style={[styles.header, { borderBottomColor: colors.border }]}>
-        <TouchableOpacity 
+        <TouchableOpacity
             style={styles.backButton}
             onPress={() => router.back()}
         >
@@ -46,7 +96,7 @@ export default function CancelOrderScreen() {
         <View style={{ width: 40 }} />
       </View>
 
-      <ScrollView 
+      <ScrollView
         contentContainerStyle={styles.scrollContent}
         showsVerticalScrollIndicator={false}
       >
@@ -56,28 +106,38 @@ export default function CancelOrderScreen() {
               <IconSymbol name="receipt" size={24} color={colorScheme === 'dark' ? '#13ec5b' : '#111813'} />
             </View>
             <View style={styles.orderInfo}>
-              <ThemedText style={styles.orderNumber}>Заказ #{id || '3920'}</ThemedText>
-              <ThemedText style={[styles.orderStatus, { color: colors.textSub }]}>В обработке • Доставка из ВкусВилл</ThemedText>
+              <ThemedText style={styles.orderNumber}>
+                Заказ #{orderId || '—'}
+              </ThemedText>
+
+              <ThemedText
+                style={[
+                  styles.orderStatus,
+                  { color: colors.textSub },
+                ]}
+              >
+                Выберите причину отмены
+              </ThemedText>
             </View>
           </View>
 
           <ThemedText style={styles.sectionTitle}>Почему вы хотите отменить заказ?</ThemedText>
-          
+
           <View style={styles.reasonsList}>
             {CANCEL_REASONS.map((reason) => (
-              <TouchableOpacity 
+              <TouchableOpacity
                 key={reason}
                 style={[
-                  styles.reasonItem, 
-                  { 
-                    backgroundColor: colors.surface, 
-                    borderColor: selectedReason === reason ? '#13ec5b' : colors.border 
+                  styles.reasonItem,
+                  {
+                    backgroundColor: colors.surface,
+                    borderColor: selectedReason === reason ? '#13ec5b' : colors.border
                   }
                 ]}
                 onPress={() => setSelectedReason(reason)}
               >
                 <View style={[
-                  styles.radioButton, 
+                  styles.radioButton,
                   { borderColor: selectedReason === reason ? '#13ec5b' : colors.border }
                 ]}>
                   {selectedReason === reason && <View style={styles.radioButtonInner} />}
@@ -96,9 +156,9 @@ export default function CancelOrderScreen() {
             <ThemedText style={styles.commentLabel}>Комментарий</ThemedText>
             <TextInput
               style={[
-                styles.commentInput, 
-                { 
-                  backgroundColor: colors.surface, 
+                styles.commentInput,
+                {
+                  backgroundColor: colors.surface,
                   borderColor: colors.border,
                   color: colors.text
                 }
@@ -107,6 +167,7 @@ export default function CancelOrderScreen() {
               placeholderTextColor={colors.textSub}
               multiline
               numberOfLines={4}
+              maxLength={400}
               value={comment}
               onChangeText={setComment}
             />
@@ -114,12 +175,33 @@ export default function CancelOrderScreen() {
         </View>
       </ScrollView>
 
+      {error ? (
+        <View style={styles.errorContainer}>
+          <ThemedText style={styles.errorText}>
+            {error}
+          </ThemedText>
+        </View>
+      ) : null}
+
       <View style={[styles.footer, { paddingBottom: Math.max(insets.bottom, 20), borderTopColor: colors.border, backgroundColor: colors.background }]}>
-        <TouchableOpacity 
-          style={styles.confirmButton}
+        <TouchableOpacity
+          style={[
+            styles.confirmButton,
+            isCancelling && { opacity: 0.6 },
+          ]}
           onPress={handleCancel}
+          disabled={isCancelling}
         >
-          <ThemedText style={styles.confirmButtonText}>Подтвердить отмену</ThemedText>
+          {isCancelling ? (
+            <ActivityIndicator
+              size="small"
+              color="#ffffff"
+            />
+          ) : (
+            <ThemedText style={styles.confirmButtonText}>
+              Подтвердить отмену
+            </ThemedText>
+          )}
         </TouchableOpacity>
       </View>
     </ThemedView>
@@ -263,5 +345,14 @@ const styles = StyleSheet.create({
     color: '#ffffff',
     fontSize: 16,
     fontWeight: '700',
+  },
+  errorContainer: {
+    paddingHorizontal: 16,
+    paddingVertical: 8,
+  },
+  errorText: {
+    color: '#dc2626',
+    fontSize: 13,
+    textAlign: 'center',
   },
 });
