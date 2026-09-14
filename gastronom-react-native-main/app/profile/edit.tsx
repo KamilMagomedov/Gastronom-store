@@ -1,5 +1,14 @@
-import React, { useState } from 'react';
-import { StyleSheet, TouchableOpacity, ScrollView, View, Image, TextInput, KeyboardAvoidingView, Platform } from 'react-native';
+import React, { useEffect, useState } from 'react';
+import {
+  ActivityIndicator,
+  KeyboardAvoidingView,
+  Platform,
+  ScrollView,
+  StyleSheet,
+  TextInput,
+  TouchableOpacity,
+  View,
+} from 'react-native';
 import { Stack, useRouter } from 'expo-router';
 import { ThemedView } from '@/components/themed-view';
 import { ThemedText } from '@/components/themed-text';
@@ -7,6 +16,12 @@ import { IconSymbol } from '@/components/ui/icon-symbol';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Colors } from '@/constants/theme';
 import { useColorScheme } from '@/hooks/use-color-scheme';
+import { useAuth } from '@/context/auth-context';
+import {
+  ApiError,
+  ApiService,
+  UpdateCustomerProfileData,
+} from '@/services/api';
 
 export default function EditProfileScreen() {
   const router = useRouter();
@@ -14,29 +29,187 @@ export default function EditProfileScreen() {
   const colorScheme = useColorScheme() ?? 'light';
   const colors = Colors[colorScheme];
 
-  const [name, setName] = useState('Александр Петров');
-  const [email, setEmail] = useState('alex.petrov@example.com');
-  const [phone, setPhone] = useState('+7 (999) 123-45-67');
-  const [address, setAddress] = useState('Москва, ул. Тверская, д. 12, кв. 45');
+  const { user } = useAuth();
+
+  const [name, setName] = useState('');
+  const [email, setEmail] = useState('');
+  const [phone, setPhone] = useState('');
+
+  const [city, setCity] = useState('');
+  const [street, setStreet] = useState('');
+  const [building, setBuilding] = useState('');
+  const [apartment, setApartment] = useState('');
+  const [entrance, setEntrance] = useState('');
+  const [floor, setFloor] = useState('');
+  const [postalCode, setPostalCode] = useState('');
+
+  const [loading, setLoading] = useState(true);
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (!user?.token) {
+      setLoading(false);
+      return;
+    }
+
+    let mounted = true;
+
+    const loadProfile = async () => {
+      try {
+        setLoading(true);
+        setError(null);
+
+        const response = await ApiService.getProfile(
+          user.token,
+        );
+
+        if (!mounted) {
+          return;
+        }
+
+        const profile = response.data;
+
+        setName(profile.name ?? '');
+        setEmail(profile.email ?? '');
+        setPhone(profile.phone ?? '');
+
+        setCity(profile.delivery_city ?? '');
+        setStreet(profile.delivery_street ?? '');
+        setBuilding(profile.delivery_building ?? '');
+        setApartment(profile.delivery_apartment ?? '');
+        setEntrance(profile.delivery_entrance ?? '');
+        setFloor(profile.delivery_floor ?? '');
+        setPostalCode(profile.delivery_postal_code ?? '');
+      } catch (loadError) {
+        console.error(
+          'Edit profile: failed to load profile',
+          loadError,
+        );
+
+        setError('Не удалось загрузить данные профиля.');
+      } finally {
+        if (mounted) {
+          setLoading(false);
+        }
+      }
+    };
+
+    loadProfile();
+
+    return () => {
+      mounted = false;
+    };
+  }, [user?.token]);
+
+  const handleSave = async () => {
+    if (!user?.token || saving) {
+      return;
+    }
+
+    const trimmedName = name.trim();
+    const trimmedEmail = email.trim();
+    const normalizedPhone = phone
+      .trim()
+      .replace(/[^\d+]/g, '');
+
+    if (!trimmedName) {
+      setError('Введите имя.');
+      return;
+    }
+
+    if (!trimmedEmail) {
+      setError('Введите email.');
+      return;
+    }
+
+    if (
+      normalizedPhone &&
+      !/^(\+7|7|8)[0-9]{10}$/.test(normalizedPhone)
+    ) {
+      setError(
+        'Введите телефон в формате +79281234567.',
+      );
+      return;
+    }
+
+    const data: UpdateCustomerProfileData = {
+      name: trimmedName,
+      email: trimmedEmail,
+      phone: normalizedPhone || null,
+      delivery_city: city.trim() || null,
+      delivery_street: street.trim() || null,
+      delivery_building: building.trim() || null,
+      delivery_apartment: apartment.trim() || null,
+      delivery_entrance: entrance.trim() || null,
+      delivery_floor: floor.trim() || null,
+      delivery_postal_code: postalCode.trim() || null,
+    };
+
+    try {
+      setSaving(true);
+      setError(null);
+
+      await ApiService.updateProfile(
+        data,
+        user.token,
+      );
+
+      router.back();
+    } catch (saveError) {
+      console.error(
+        'Edit profile: failed to update profile',
+        saveError,
+      );
+
+      const apiError = saveError as ApiError;
+
+      setError(
+        apiError?.message ||
+          'Не удалось сохранить изменения.',
+      );
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  if (loading) {
+    return (
+      <ThemedView
+        style={[
+          styles.container,
+          {
+            paddingTop: insets.top,
+            alignItems: 'center',
+            justifyContent: 'center',
+          },
+        ]}
+      >
+        <ActivityIndicator
+          size="large"
+          color={colors.primary}
+        />
+      </ThemedView>
+    );
+  }
 
   return (
-    <KeyboardAvoidingView 
+    <KeyboardAvoidingView
       behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
       style={{ flex: 1 }}
     >
       <ThemedView style={[styles.container, { paddingTop: insets.top }]}>
         <Stack.Screen options={{ headerShown: false }} />
-        
-        {/* Header */}
+
         <View style={[styles.header, { borderBottomColor: colors.border }]}>
-          <TouchableOpacity 
+          <TouchableOpacity
             onPress={() => router.back()}
             style={styles.backButton}
           >
             <IconSymbol name="chevron.left" size={24} color={colors.text} />
           </TouchableOpacity>
           <ThemedText style={styles.headerTitle}>Редактирование</ThemedText>
-          <TouchableOpacity 
+          <TouchableOpacity
             onPress={() => router.back()}
             style={styles.cancelButton}
           >
@@ -45,29 +218,32 @@ export default function EditProfileScreen() {
         </View>
 
         <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={styles.scrollContent}>
-          {/* Profile Header with Avatar */}
           <View style={styles.avatarSection}>
-            <View style={styles.avatarWrapper}>
-              <Image 
-                source={{ uri: 'https://lh3.googleusercontent.com/aida-public/AB6AXuCIjh7_-rwypcsFwdkOkAh4cQY3sGW0i3GG6Iu9SaOnKkuAKHJ-eS5wyyoqeAPlDzu_RBpaUiV0uDzOlOIK_j05Plwhtsj3kZc7tJ45VOmYR84Rf7nGy3relhlS_-bHDnKacbM3Oi1yKTgEwsQWydD86KJAEQtxeAcWivs1eH_L2AdjEN1HyDewfqkpOGy0st2m0tNV4mX_V4QXmrSqaUab9vn9kwb3DLRS56Qovgb9Kkricw1ru5XnLr3UG_o3Gx3gqFTxuu8F3xM' }} 
-                style={styles.avatar} 
-              />
-              <View style={[styles.editBadge, { backgroundColor: colors.primary, borderColor: colors.background }]}>
-                <IconSymbol name="camera.fill" size={18} color="#000" />
-              </View>
+            <View
+              style={[
+                styles.profileInitialCircle,
+                {
+                  borderColor: colors.primary,
+                  backgroundColor: colors.surface,
+                },
+              ]}
+            >
+              <ThemedText style={styles.profileInitial}>
+                {name.trim().charAt(0).toUpperCase() || '?'}
+              </ThemedText>
             </View>
-            <ThemedText style={styles.profileName}>{name}</ThemedText>
-            <ThemedText style={[styles.changePhotoText, { color: colors.textSub }]}>Изменить фото профиля</ThemedText>
+
+            <ThemedText style={styles.profileName}>
+              {name || 'Пользователь'}
+            </ThemedText>
           </View>
 
-          {/* Form Fields */}
           <View style={styles.form}>
-            {/* Name Field */}
             <View style={styles.inputContainer}>
               <ThemedText style={styles.label}>Имя и Фамилия</ThemedText>
               <View style={[styles.inputWrapper, { backgroundColor: colors.surface, borderColor: colors.border }]}>
                 <IconSymbol name="person" size={20} color={colors.textSub} style={styles.inputIcon} />
-                <TextInput 
+                <TextInput
                   style={[styles.input, { color: colors.text }]}
                   value={name}
                   onChangeText={setName}
@@ -77,12 +253,11 @@ export default function EditProfileScreen() {
               </View>
             </View>
 
-            {/* Email Field */}
             <View style={styles.inputContainer}>
               <ThemedText style={styles.label}>Email</ThemedText>
               <View style={[styles.inputWrapper, { backgroundColor: colors.surface, borderColor: colors.border }]}>
                 <IconSymbol name="envelope" size={20} color={colors.textSub} style={styles.inputIcon} />
-                <TextInput 
+                <TextInput
                   style={[styles.input, { color: colors.text }]}
                   value={email}
                   onChangeText={setEmail}
@@ -94,12 +269,11 @@ export default function EditProfileScreen() {
               </View>
             </View>
 
-            {/* Phone Field */}
             <View style={styles.inputContainer}>
               <ThemedText style={styles.label}>Телефон</ThemedText>
               <View style={[styles.inputWrapper, { backgroundColor: colors.surface, borderColor: colors.border }]}>
                 <IconSymbol name="phone" size={20} color={colors.textSub} style={styles.inputIcon} />
-                <TextInput 
+                <TextInput
                   style={[styles.input, { color: colors.text }]}
                   value={phone}
                   onChangeText={setPhone}
@@ -110,34 +284,279 @@ export default function EditProfileScreen() {
               </View>
             </View>
 
-            {/* Address Field */}
             <View style={styles.inputContainer}>
-              <ThemedText style={styles.label}>Адрес доставки</ThemedText>
-              <View style={[styles.inputWrapper, { backgroundColor: colors.surface, borderColor: colors.border, alignItems: 'flex-start', minHeight: 100 }]}>
-                <IconSymbol name="mappin" size={20} color={colors.textSub} style={[styles.inputIcon, { marginTop: 14 }]} />
-                <TextInput 
-                  style={[styles.input, { color: colors.text, height: '100%', paddingTop: 14 }]}
-                  value={address}
-                  onChangeText={setAddress}
-                  placeholder="Город, улица, дом, квартира"
+              <ThemedText style={styles.label}>
+                Город
+              </ThemedText>
+
+              <View
+                style={[
+                  styles.inputWrapper,
+                  {
+                    backgroundColor: colors.surface,
+                    borderColor: colors.border,
+                  },
+                ]}
+              >
+                <IconSymbol
+                  name="mappin"
+                  size={20}
+                  color={colors.textSub}
+                  style={styles.inputIcon}
+                />
+
+                <TextInput
+                  style={[
+                    styles.input,
+                    { color: colors.text },
+                  ]}
+                  value={city}
+                  onChangeText={setCity}
+                  placeholder="Город"
                   placeholderTextColor={colors.textSub}
-                  multiline
-                  textAlignVertical="top"
+                />
+              </View>
+            </View>
+
+            <View style={styles.inputContainer}>
+              <ThemedText style={styles.label}>
+                Улица
+              </ThemedText>
+
+              <View
+                style={[
+                  styles.inputWrapper,
+                  {
+                    backgroundColor: colors.surface,
+                    borderColor: colors.border,
+                  },
+                ]}
+              >
+                <IconSymbol
+                  name="mappin"
+                  size={20}
+                  color={colors.textSub}
+                  style={styles.inputIcon}
+                />
+
+                <TextInput
+                  style={[
+                    styles.input,
+                    { color: colors.text },
+                  ]}
+                  value={street}
+                  onChangeText={setStreet}
+                  placeholder="Улица"
+                  placeholderTextColor={colors.textSub}
+                />
+              </View>
+            </View>
+
+            <View style={styles.inputContainer}>
+              <ThemedText style={styles.label}>
+                Дом
+              </ThemedText>
+
+              <View
+                style={[
+                  styles.inputWrapper,
+                  {
+                    backgroundColor: colors.surface,
+                    borderColor: colors.border,
+                  },
+                ]}
+              >
+                <IconSymbol
+                  name="mappin"
+                  size={20}
+                  color={colors.textSub}
+                  style={styles.inputIcon}
+                />
+
+                <TextInput
+                  style={[
+                    styles.input,
+                    { color: colors.text },
+                  ]}
+                  value={building}
+                  onChangeText={setBuilding}
+                  placeholder="Дом"
+                  placeholderTextColor={colors.textSub}
+                />
+              </View>
+            </View>
+
+            <View style={styles.inputContainer}>
+              <ThemedText style={styles.label}>
+                Квартира
+              </ThemedText>
+
+              <View
+                style={[
+                  styles.inputWrapper,
+                  {
+                    backgroundColor: colors.surface,
+                    borderColor: colors.border,
+                  },
+                ]}
+              >
+                <IconSymbol
+                  name="mappin"
+                  size={20}
+                  color={colors.textSub}
+                  style={styles.inputIcon}
+                />
+
+                <TextInput
+                  style={[
+                    styles.input,
+                    { color: colors.text },
+                  ]}
+                  value={apartment}
+                  onChangeText={setApartment}
+                  placeholder="Квартира"
+                  placeholderTextColor={colors.textSub}
+                />
+              </View>
+            </View>
+
+            <View style={styles.inputContainer}>
+              <ThemedText style={styles.label}>
+                Подъезд
+              </ThemedText>
+
+              <View
+                style={[
+                  styles.inputWrapper,
+                  {
+                    backgroundColor: colors.surface,
+                    borderColor: colors.border,
+                  },
+                ]}
+              >
+                <IconSymbol
+                  name="mappin"
+                  size={20}
+                  color={colors.textSub}
+                  style={styles.inputIcon}
+                />
+
+                <TextInput
+                  style={[
+                    styles.input,
+                    { color: colors.text },
+                  ]}
+                  value={entrance}
+                  onChangeText={setEntrance}
+                  placeholder="Подъезд"
+                  placeholderTextColor={colors.textSub}
+                />
+              </View>
+            </View>
+
+            <View style={styles.inputContainer}>
+              <ThemedText style={styles.label}>
+                Этаж
+              </ThemedText>
+
+              <View
+                style={[
+                  styles.inputWrapper,
+                  {
+                    backgroundColor: colors.surface,
+                    borderColor: colors.border,
+                  },
+                ]}
+              >
+                <IconSymbol
+                  name="mappin"
+                  size={20}
+                  color={colors.textSub}
+                  style={styles.inputIcon}
+                />
+
+                <TextInput
+                  style={[
+                    styles.input,
+                    { color: colors.text },
+                  ]}
+                  value={floor}
+                  onChangeText={setFloor}
+                  placeholder="Этаж"
+                  placeholderTextColor={colors.textSub}
+                />
+              </View>
+            </View>
+
+            <View style={styles.inputContainer}>
+              <ThemedText style={styles.label}>
+                Индекс
+              </ThemedText>
+
+              <View
+                style={[
+                  styles.inputWrapper,
+                  {
+                    backgroundColor: colors.surface,
+                    borderColor: colors.border,
+                  },
+                ]}
+              >
+                <IconSymbol
+                  name="mappin"
+                  size={20}
+                  color={colors.textSub}
+                  style={styles.inputIcon}
+                />
+
+                <TextInput
+                  style={[
+                    styles.input,
+                    { color: colors.text },
+                  ]}
+                  value={postalCode}
+                  onChangeText={setPostalCode}
+                  placeholder="Индекс"
+                  placeholderTextColor={colors.textSub}
                 />
               </View>
             </View>
           </View>
-          
+
           <View style={{ height: 120 }} />
         </ScrollView>
 
-        {/* Footer */}
-        <View style={[styles.footer, { paddingBottom: Math.max(insets.bottom, 16) }]}>
-          <TouchableOpacity 
-            style={[styles.saveButton, { backgroundColor: colors.primary }]}
-            onPress={() => router.back()}
+        {error ? (
+          <ThemedText style={styles.errorText}>
+            {error}
+          </ThemedText>
+        ) : null}
+
+        <View style={[styles.footer, {
+          paddingBottom: Math.max(insets.bottom, 16),
+          backgroundColor: colors.background,
+          }]}>
+          <TouchableOpacity
+            style={[
+              styles.saveButton,
+              {
+                backgroundColor: colors.primary,
+                opacity: saving ? 0.6 : 1,
+              },
+            ]}
+            onPress={handleSave}
+            disabled={saving}
           >
-            <ThemedText style={styles.saveButtonText}>Сохранить изменения</ThemedText>
+            {saving ? (
+              <ActivityIndicator
+                size="small"
+                color="#102216"
+              />
+            ) : (
+              <ThemedText style={styles.saveButtonText}>
+                Сохранить изменения
+              </ThemedText>
+            )}
           </TouchableOpacity>
         </View>
       </ThemedView>
@@ -181,33 +600,22 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     paddingVertical: 32,
   },
-  avatarWrapper: {
-    position: 'relative',
-  },
-  avatar: {
+  profileInitialCircle: {
     width: 120,
     height: 120,
     borderRadius: 60,
-  },
-  editBadge: {
-    position: 'absolute',
-    bottom: 0,
-    right: 0,
-    width: 36,
-    height: 36,
-    borderRadius: 18,
-    borderWidth: 4,
+    borderWidth: 3,
     alignItems: 'center',
     justifyContent: 'center',
+  },
+  profileInitial: {
+    fontSize: 42,
+    fontWeight: '800',
   },
   profileName: {
     fontSize: 24,
     fontWeight: '800',
     marginTop: 16,
-  },
-  changePhotoText: {
-    fontSize: 14,
-    marginTop: 4,
   },
   form: {
     paddingHorizontal: 20,
@@ -259,5 +667,12 @@ const styles = StyleSheet.create({
     color: '#102216',
     fontSize: 18,
     fontWeight: '800',
+  },
+  errorText: {
+    color: '#dc2626',
+    fontSize: 13,
+    textAlign: 'center',
+    marginHorizontal: 20,
+    marginBottom: 8,
   },
 });

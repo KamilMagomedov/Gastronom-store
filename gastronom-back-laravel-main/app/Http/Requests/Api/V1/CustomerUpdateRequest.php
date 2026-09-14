@@ -22,17 +22,80 @@ class CustomerUpdateRequest extends FormRequest
     public function rules(): array
     {
         return [
-            'name' => ['sometimes', 'string', 'max:190'],
-            'email' => ['sometimes', 'email', 'unique:customers,email,'.$this->user()->id],
-            'password' => ['sometimes', 'string', 'min:8', 'confirmed'],
-            'phone' => ['sometimes', 'string', 'regex:/^(\+7|7|8)[0-9]{10}$/'],
-            'delivery_street' => ['sometimes', 'string', 'max:190'],
-            'delivery_city' => ['sometimes', 'string', 'max:100'],
-            'delivery_apartment' => ['sometimes', 'string', 'max:10'],
-            'delivery_postal_code' => ['sometimes', 'string', 'max:20'],
-            'delivery_building' => ['sometimes', 'string', 'max:10'],
-            'delivery_entrance' => ['sometimes', 'string', 'max:10'],
-            'delivery_floor' => ['sometimes', 'string', 'max:10'],
+            'name' => [
+                'sometimes',
+                'string',
+                'max:190'
+            ],
+
+            'email' => [
+                'sometimes',
+                'email',
+                'unique:customers,email,'.$this->user()->id
+            ],
+
+            'password' => [
+                'sometimes',
+                'string',
+                'min:8',
+                'confirmed'
+            ],
+
+            'phone' => [
+                'sometimes',
+                'nullable',
+                'string',
+                'regex:/^(\+7|7|8)[0-9]{10}$/',
+            ],
+
+            'delivery_street' => [
+                'sometimes',
+                'nullable',
+                'string',
+                'max:190',
+            ],
+
+            'delivery_city' => [
+                'sometimes',
+                'nullable',
+                'string',
+                'max:100',
+            ],
+
+            'delivery_apartment' => [
+                'sometimes',
+                'nullable',
+                'string',
+                'max:10',
+            ],
+
+            'delivery_postal_code' => [
+                'sometimes',
+                'nullable',
+                'string',
+                'max:20',
+            ],
+
+            'delivery_building' => [
+                'sometimes',
+                'nullable',
+                'string',
+                'max:10',
+            ],
+
+            'delivery_entrance' => [
+                'sometimes',
+                'nullable',
+                'string',
+                'max:10',
+            ],
+
+            'delivery_floor' => [
+                'sometimes',
+                'nullable',
+                'string',
+                'max:10',
+            ],
         ];
     }
 

@@ -290,7 +290,7 @@ async function request<T>(
 
   try {
     console.log(`API: ${options.method || 'GET'} ${API_BASE_URL}${path}`);
-    
+
     const response = await fetch(`${API_BASE_URL}${path}`, {
       ...options,
       signal: controller.signal,
@@ -364,6 +364,35 @@ export interface ApiOrderRepeatCheck {
   total_unavailable_items: number;
 }
 
+export interface ApiCustomerProfile {
+  id: number;
+  name: string;
+  email: string;
+  email_verified_at: string | null;
+  phone: string | null;
+  delivery_street: string | null;
+  delivery_city: string | null;
+  delivery_apartment: string | null;
+  delivery_postal_code: string | null;
+  delivery_building: string | null;
+  delivery_entrance: string | null;
+  delivery_floor: string | null;
+  created_at: string;
+}
+
+export interface UpdateCustomerProfileData {
+  name?: string;
+  email?: string;
+  phone?: string | null;
+  delivery_street?: string | null;
+  delivery_city?: string | null;
+  delivery_apartment?: string | null;
+  delivery_postal_code?: string | null;
+  delivery_building?: string | null;
+  delivery_entrance?: string | null;
+  delivery_floor?: string | null;
+}
+
 export class ApiService {
   static async register(data: RegistrationData): Promise<AuthResponse> {
     return request<AuthResponse>('/v1/auth/register', {
@@ -429,6 +458,41 @@ export class ApiService {
     });
   }
 
+  static async getProfile(
+    token: string,
+  ): Promise<{
+    data: ApiCustomerProfile;
+    success: boolean;
+  }> {
+    return request<{
+      data: ApiCustomerProfile;
+      success: boolean;
+    }>('/v1/profile', {
+      headers: {
+        Authorization: `Bearer ${token}`,
+      },
+    });
+  }
+
+  static async updateProfile(
+    data: UpdateCustomerProfileData,
+    token: string,
+  ): Promise<{
+    data: ApiCustomerProfile;
+    success: boolean;
+  }> {
+    return request<{
+      data: ApiCustomerProfile;
+      success: boolean;
+    }>('/v1/profile', {
+      method: 'PUT',
+      body: JSON.stringify(data),
+      headers: {
+        Authorization: `Bearer ${token}`,
+      },
+    });
+  }
+
   static async logout(token: string): Promise<void> {
     await request('/v1/auth/logout', {
       method: 'DELETE',
@@ -468,7 +532,7 @@ export class ApiService {
 
   static async clearCart(token?: string, sessionId?: string): Promise<void> {
     const params = (!token && sessionId) ? `?session_id=${sessionId}` : '';
-    
+
     await request(`/v1/carts-clear${params}`, {
       method: 'GET',
       headers: token ? { Authorization: `Bearer ${token}` } : {},
@@ -498,7 +562,7 @@ export class ApiService {
       },
     );
   }
-  
+
   static async getOrder(
     id: number | string,
     token: string,

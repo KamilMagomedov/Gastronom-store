@@ -1,6 +1,9 @@
 
-import React, { useState } from 'react';
-import { StyleSheet, TouchableOpacity, ScrollView, View, Image } from 'react-native';
+import React, {
+  useCallback,
+  useState,
+} from 'react';
+import { StyleSheet, TouchableOpacity, ScrollView, View } from 'react-native';
 import { Stack, useRouter } from 'expo-router';
 import { ThemedView } from '@/components/themed-view';
 import { ThemedText } from '@/components/themed-text';
@@ -9,8 +12,12 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Colors } from '@/constants/theme';
 import { useColorScheme } from '@/hooks/use-color-scheme';
 import { useAuth } from '@/context/auth-context';
-import { ApiService } from '@/services/api';
 import { ConfirmModal } from '@/components/ui/confirm-modal';
+import { useFocusEffect } from '@react-navigation/native';
+import {
+  ApiCustomerProfile,
+  ApiService,
+} from '@/services/api';
 
 export default function ProfileScreen() {
   const router = useRouter();
@@ -20,6 +27,49 @@ export default function ProfileScreen() {
   const { user, logout } = useAuth();
   const [isLoggingOut, setIsLoggingOut] = useState(false);
   const [showLogoutModal, setShowLogoutModal] = useState(false);
+  const [profile, setProfile] = useState<ApiCustomerProfile | null>(null);
+  const [profileLoading, setProfileLoading] = useState(true);
+
+  useFocusEffect(
+    useCallback(() => {
+      if (!user?.token) {
+        setProfileLoading(false);
+        return;
+      }
+
+      let mounted = true;
+
+      const loadProfile = async () => {
+        setProfileLoading(true);
+
+        try {
+          const response =
+            await ApiService.getProfile(
+              user.token,
+            );
+
+          if (mounted) {
+            setProfile(response.data);
+          }
+        } catch (error) {
+          console.error(
+            'Profile: failed to load profile',
+            error,
+          );
+        } finally {
+          if (mounted) {
+            setProfileLoading(false);
+          }
+        }
+      };
+
+      loadProfile();
+
+      return () => {
+        mounted = false;
+      };
+    }, [user?.token]),
+  );
 
   const confirmLogout = async () => {
     setShowLogoutModal(false);
@@ -47,25 +97,45 @@ export default function ProfileScreen() {
   return (
     <ThemedView style={[styles.container, { paddingTop: insets.top }]}>
       <Stack.Screen options={{ headerShown: false }} />
-      
+
       <ScrollView showsVerticalScrollIndicator={false}>
-        {/* Profile Header */}
         <View style={styles.header}>
-            <View style={[styles.avatarContainer, { borderColor: colors.primary }]}>
-                <Image 
-                    source={{ uri: 'https://lh3.googleusercontent.com/aida-public/AB6AXuCIjh7_-rwypcsFwdkOkAh4cQY3sGW0i3GG6Iu9SaOnKkuAKHJ-eS5wyyoqeAPlDzu_RBpaUiV0uDzOlOIK_j05Plwhtsj3kZc7tJ45VOmYR84Rf7nGy3relhlS_-bHDnKacbM3Oi1yKTgEwsQWydD86KJAEQtxeAcWivs1eH_L2AdjEN1HyDewfqkpOGy0st2m0tNV4mX_V4QXmrSqaUab9vn9kwb3DLRS56Qovgb9Kkricw1ru5XnLr3UG_o3Gx3gqFTxuu8F3xM' }} 
-                    style={styles.avatar} 
-                />
-            </View>
-            <ThemedText style={styles.userName}>Александр Петров</ThemedText>
-            <ThemedText style={[styles.userEmail, { color: colors.textSub }]}>alex.petrov@example.com</ThemedText>
+        <View
+          style={[
+            styles.avatarContainer,
+            {
+              borderColor: colors.primary,
+              backgroundColor: colors.surface,
+            },
+          ]}
+        >
+          <ThemedText style={styles.avatarInitial}>
+            {profile?.name
+              ?.trim()
+              .charAt(0)
+              .toUpperCase() || '?'}
+          </ThemedText>
+        </View>
+          <ThemedText style={styles.userName}>
+            {profileLoading
+              ? 'Загрузка...'
+              : profile?.name || 'Пользователь'}
+          </ThemedText>
+
+          <ThemedText
+            style={[
+              styles.userEmail,
+              { color: colors.textSub },
+            ]}
+          >
+            {profile?.email || ''}
+          </ThemedText>
         </View>
 
-        {/* Menu Items */}
         <View style={styles.menuContainer}>
           {menuItems.map((item, index) => (
-            <TouchableOpacity 
-              key={index} 
+            <TouchableOpacity
+              key={index}
               style={[styles.menuItem, { borderBottomColor: colors.border }]}
               onPress={() => router.push(item.route as any)}
             >
@@ -124,11 +194,8 @@ const styles = StyleSheet.create({
     borderWidth: 3,
     padding: 3,
     marginBottom: 16,
-  },
-  avatar: {
-    width: '100%',
-    height: '100%',
-    borderRadius: 47,
+    alignItems: 'center',
+    justifyContent: 'center',
   },
   userName: {
     fontSize: 22,
@@ -175,5 +242,9 @@ const styles = StyleSheet.create({
     color: '#ef4444',
     fontSize: 16,
     fontWeight: '700',
+  },
+  avatarInitial: {
+    fontSize: 36,
+    fontWeight: '800',
   },
 });
