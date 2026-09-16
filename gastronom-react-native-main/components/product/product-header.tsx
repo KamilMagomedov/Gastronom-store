@@ -2,20 +2,39 @@ import React from 'react';
 import { View, StyleSheet, TouchableOpacity } from 'react-native';
 import { useRouter } from 'expo-router';
 import { IconSymbol } from '@/components/ui/icon-symbol';
+import { useFavorites } from '@/context/favorites-context';
 
-export function ProductImageHeader({ image }: { image: string }) {
+export function ProductImageHeader({ productId }: { productId?: number }) {
   const router = useRouter();
+  const { isFavorite, toggleFavorite, isUpdating } = useFavorites();
+
+  const favorite = productId ? isFavorite(productId) : false;
+
+  const favoriteUpdating = productId ? isUpdating(productId) : false;
+
+  const handleFavorite = () => {
+    if (!productId || favoriteUpdating) {
+      return;
+    }
+
+    void toggleFavorite(productId);
+  };
 
   return (
     <View style={styles.header}>
-      <TouchableOpacity 
-        style={styles.backButton}
-        onPress={() => router.back()}
-      >
+      <TouchableOpacity style={styles.backButton} onPress={() => router.back()}>
         <IconSymbol name="chevron.left" size={24} color="#111813" />
       </TouchableOpacity>
-      <TouchableOpacity style={styles.favoriteButton}>
-        <IconSymbol name="heart" size={24} color="#111813" />
+      <TouchableOpacity
+        style={[styles.favoriteButton, favoriteUpdating && { opacity: 0.5 }]}
+        onPress={handleFavorite}
+        disabled={!productId || favoriteUpdating}
+      >
+        <IconSymbol
+          name={favorite ? 'heart.fill' : 'heart'}
+          size={24}
+          color={favorite ? '#ef4444' : '#111813'}
+        />
       </TouchableOpacity>
     </View>
   );

@@ -1,5 +1,13 @@
 import React, { useEffect, useState, useCallback } from 'react';
-import { StyleSheet, ScrollView, View, Text, TouchableOpacity, ActivityIndicator, RefreshControl } from 'react-native';
+import {
+  StyleSheet,
+  ScrollView,
+  View,
+  Text,
+  TouchableOpacity,
+  ActivityIndicator,
+  RefreshControl,
+} from 'react-native';
 import { ThemedView } from '@/components/themed-view';
 import { Colors } from '@/constants/theme';
 import { useColorScheme } from '@/hooks/use-color-scheme';
@@ -13,19 +21,21 @@ import { getCached, setCached, invalidateCache, TTL } from '@/services/cache';
 
 const CACHE_KEY_FREQUENT = 'home:frequently-purchased';
 
-// Map API product to ProductCard's expected shape
-function mapProduct(p: ApiProduct) {
+function mapProduct(item: ApiProduct) {
   return {
-    id: String(p.id),
-    slug: p.slug,
-    name: p.name,
-    price: parseFloat(p.price),
-    oldPrice: p.old_price ? parseFloat(p.old_price) : undefined,
-    discount: p.old_price
-      ? `-${Math.round((1 - parseFloat(p.price) / parseFloat(p.old_price)) * 100)}%`
+    id: String(item.id),
+    slug: item.slug,
+    name: item.name,
+    price: parseFloat(item.price),
+    oldPrice: item.old_price ? parseFloat(item.old_price) : undefined,
+    discount: item.old_price
+      ? `-${Math.round((1 - parseFloat(item.price) / parseFloat(item.old_price)) * 100)}%`
       : undefined,
-    unit: p.unit,
-    image: p.image,
+    unit: item.unit,
+    image: item.image,
+    stock: item.stock_quantity,
+    inStock: item.in_stock,
+    isActive: item.is_active,
   };
 }
 
@@ -83,11 +93,12 @@ export default function HomeScreen() {
   }, [fetchAll]);
 
   // Filter popular products by selected category
-  const filteredPopular = selectedCategoryId === null
-    ? popularProducts
-    : popularProducts.filter((p) => p.category.id === selectedCategoryId);
+  const filteredPopular =
+    selectedCategoryId === null
+      ? popularProducts
+      : popularProducts.filter((p) => p.category.id === selectedCategoryId);
 
-    console.log('frequentProducts: ', frequentProducts)
+  console.log('frequentProducts: ', frequentProducts);
   return (
     <ThemedView style={[styles.container, { backgroundColor: colors.background }]}>
       <HomeHeader />

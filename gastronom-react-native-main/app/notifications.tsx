@@ -1,187 +1,372 @@
 import { ThemedView } from '@/components/themed-view';
 import { IconSymbol } from '@/components/ui/icon-symbol';
 import { Colors } from '@/constants/theme';
+import { useAuth } from '@/context/auth-context';
 import { useColorScheme } from '@/hooks/use-color-scheme';
+import { ApiService, type ApiNotification } from '@/services/api';
+import { useFocusEffect } from '@react-navigation/native';
 import { Stack, useRouter } from 'expo-router';
-import React, { useMemo, useState } from 'react';
-import { ScrollView, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
+import React, { useCallback, useMemo, useState } from 'react';
+import {
+  ActivityIndicator,
+  ScrollView,
+  StyleSheet,
+  Text,
+  TouchableOpacity,
+  View,
+} from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 type NotificationType = 'Все' | 'Заказы' | 'Акции' | 'Новости';
 
-interface Notification {
+type NotificationSection = 'Сегодня' | 'Вчера' | 'Ранее';
+
+interface NotificationItem {
   id: string;
   title: string;
   message: string;
   time: string;
   type: 'order' | 'promo' | 'news';
   icon: string;
-  iconBg: { light: string; dark: string };
+  iconBg: {
+    light: string;
+    dark: string;
+  };
   iconColor: string;
   isRead: boolean;
-  section: 'Сегодня' | 'Вчера' | 'Ранее';
-  opacity?: number;
+  section: NotificationSection;
+  opacity: number;
+  orderId: number | null;
 }
 
 const CATEGORIES: NotificationType[] = ['Все', 'Заказы', 'Акции', 'Новости'];
 
-const NOTIFICATIONS: Notification[] = [
-  {
-    id: '1',
-    title: 'Заказ №5932 доставлен',
-    message: 'Курьер оставил заказ у двери. Приятного аппетита!',
-    time: '10 мин',
-    type: 'order',
-    icon: 'checkmark.circle.fill',
-    iconBg: { light: 'rgba(74, 222, 128, 0.1)', dark: 'rgba(74, 222, 128, 0.15)' },
-    iconColor: '#16a34a',
-    isRead: false,
-    section: 'Сегодня'
-  },
-  {
-    id: '2',
-    title: 'Скидка 20% на фрукты',
-    message: 'Только сегодня! Свежие яблоки и груши по специальной цене.',
-    time: '2 ч',
-    type: 'promo',
-    icon: 'percent',
-    iconBg: { light: 'rgba(250, 204, 21, 0.1)', dark: 'rgba(250, 204, 21, 0.15)' },
-    iconColor: '#ca8a04',
-    isRead: false,
-    section: 'Сегодня'
-  },
-  {
-    id: '3',
-    title: 'Курьер уже в пути',
-    message: 'Заказ №5934 передан курьеру. Ожидайте доставку через 25-30 минут.',
-    time: '4 ч',
-    type: 'order',
-    icon: 'shippingbox.fill',
-    iconBg: { light: 'rgba(19, 236, 91, 0.1)', dark: 'rgba(19, 236, 91, 0.15)' },
-    iconColor: '#13ec5b',
-    isRead: true,
-    section: 'Сегодня'
-  },
-  {
-    id: '4',
-    title: 'Обновление приложения',
-    message: 'Мы улучшили поиск товаров. Теперь находить любимые продукты проще.',
-    time: '14:00',
-    type: 'news',
-    icon: 'arrow.up.circle.fill',
-    iconBg: { light: 'rgba(59, 130, 246, 0.1)', dark: 'rgba(59, 130, 246, 0.15)' },
-    iconColor: '#2563eb',
-    isRead: true,
-    section: 'Вчера'
-  },
-  {
-    id: '5',
-    title: 'Кэшбэк 5% по вашей карте',
-    message: 'При оплате картой МИР возвращаем 5% бонусами на ваш счет.',
-    time: '11:20',
-    type: 'promo',
-    icon: 'creditcard.fill',
-    iconBg: { light: 'rgba(168, 85, 247, 0.1)', dark: 'rgba(168, 85, 247, 0.15)' },
-    iconColor: '#9333ea',
-    isRead: true,
-    section: 'Вчера'
-  },
-  {
-    id: '6',
-    title: 'Заказ №5931 собран',
-    message: 'Сборщик отобрал самые свежие продукты для вашего заказа.',
-    time: '09:45',
-    type: 'order',
-    icon: 'bag.fill',
-    iconBg: { light: 'rgba(229, 231, 235, 1)', dark: 'rgba(31, 41, 55, 1)' },
-    iconColor: '#6b7280',
-    isRead: true,
-    section: 'Вчера',
-    opacity: 0.8
-  },
-  {
-    id: '7',
-    title: 'Новая подборка рецептов',
-    message: 'Приготовили для вас 5 идей быстрых ужинов из сезонных овощей.',
-    time: '12 Окт',
-    type: 'news',
-    icon: 'book.fill',
-    iconBg: { light: 'rgba(236, 72, 153, 0.1)', dark: 'rgba(236, 72, 153, 0.15)' },
-    iconColor: '#db2777',
-    isRead: true,
-    section: 'Ранее'
-  },
-  {
-    id: '8',
-    title: 'Заказ №5928 отменен',
-    message: 'Возврат средств за заказ №5928 произведен. Деньги вернутся в течение 3-х дней.',
-    time: '10 Окт',
-    type: 'order',
-    icon: 'xmark.circle.fill',
-    iconBg: { light: 'rgba(239, 68, 68, 0.1)', dark: 'rgba(239, 68, 68, 0.15)' },
-    iconColor: '#dc2626',
-    isRead: true,
-    section: 'Ранее'
-  },
-  {
-    id: '9',
-    title: 'Подарки к выходным',
-    message: 'Закажите на сумму от 2500 руб и получите набор ягод в подарок!',
-    time: '08 Окт',
-    type: 'promo',
-    icon: 'gift.fill',
-    iconBg: { light: 'rgba(249, 115, 22, 0.1)', dark: 'rgba(249, 115, 22, 0.15)' },
-    iconColor: '#ea580c',
-    isRead: true,
-    section: 'Ранее'
+const getNotificationSection = (createdAt: string | null): NotificationSection => {
+  if (!createdAt) {
+    return 'Ранее';
   }
-];
+
+  const date = new Date(createdAt);
+
+  if (Number.isNaN(date.getTime())) {
+    return 'Ранее';
+  }
+
+  const now = new Date();
+
+  const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+
+  const yesterday = new Date(today);
+  yesterday.setDate(today.getDate() - 1);
+
+  if (date >= today) {
+    return 'Сегодня';
+  }
+
+  if (date >= yesterday) {
+    return 'Вчера';
+  }
+
+  return 'Ранее';
+};
+
+const getNotificationTime = (createdAt: string | null): string => {
+  if (!createdAt) {
+    return '';
+  }
+
+  const date = new Date(createdAt);
+
+  if (Number.isNaN(date.getTime())) {
+    return '';
+  }
+
+  const now = new Date();
+  const difference = now.getTime() - date.getTime();
+
+  const minutes = Math.floor(difference / (1000 * 60));
+
+  if (minutes >= 0 && minutes < 1) {
+    return 'только что';
+  }
+
+  if (minutes >= 1 && minutes < 60) {
+    return `${minutes} мин`;
+  }
+
+  const hours = Math.floor(minutes / 60);
+
+  if (hours >= 1 && hours < 24) {
+    return `${hours} ч`;
+  }
+
+  return date.toLocaleDateString('ru-RU', {
+    day: 'numeric',
+    month: 'short',
+  });
+};
+
+const getNotificationVisual = (item: ApiNotification) => {
+  if (item.type === 'promo') {
+    return {
+      type: 'promo' as const,
+      icon: 'percent',
+      iconBg: {
+        light: 'rgba(250, 204, 21, 0.1)',
+        dark: 'rgba(250, 204, 21, 0.15)',
+      },
+      iconColor: '#ca8a04',
+    };
+  }
+
+  if (item.type === 'news') {
+    return {
+      type: 'news' as const,
+      icon: 'bell.fill',
+      iconBg: {
+        light: 'rgba(59, 130, 246, 0.1)',
+        dark: 'rgba(59, 130, 246, 0.15)',
+      },
+      iconColor: '#2563eb',
+    };
+  }
+
+  if (item.status === 'completed') {
+    return {
+      type: 'order' as const,
+      icon: 'checkmark.circle.fill',
+      iconBg: {
+        light: 'rgba(74, 222, 128, 0.1)',
+        dark: 'rgba(74, 222, 128, 0.15)',
+      },
+      iconColor: '#16a34a',
+    };
+  }
+
+  if (item.status === 'delivering') {
+    return {
+      type: 'order' as const,
+      icon: 'shippingbox.fill',
+      iconBg: {
+        light: 'rgba(19, 236, 91, 0.1)',
+        dark: 'rgba(19, 236, 91, 0.15)',
+      },
+      iconColor: '#13ec5b',
+    };
+  }
+
+  if (item.status === 'cancelled' || item.status === 'refunded') {
+    return {
+      type: 'order' as const,
+      icon: 'xmark.circle.fill',
+      iconBg: {
+        light: 'rgba(239, 68, 68, 0.1)',
+        dark: 'rgba(239, 68, 68, 0.15)',
+      },
+      iconColor: '#dc2626',
+    };
+  }
+
+  return {
+    type: 'order' as const,
+    icon: 'clock.fill',
+    iconBg: {
+      light: 'rgba(59, 130, 246, 0.1)',
+      dark: 'rgba(59, 130, 246, 0.15)',
+    },
+    iconColor: '#2563eb',
+  };
+};
 
 export default function NotificationsScreen() {
   const router = useRouter();
   const insets = useSafeAreaInsets();
   const colorScheme = useColorScheme() ?? 'light';
   const colors = Colors[colorScheme];
+  const { user, isLoading: authLoading } = useAuth();
+
+  const [notifications, setNotifications] = useState<ApiNotification[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
   const [activeCategory, setActiveCategory] = useState<NotificationType>('Все');
 
+  const [updatingNotificationId, setUpdatingNotificationId] = useState<string | null>(null);
+  const [markingAll, setMarkingAll] = useState(false);
+
+  useFocusEffect(
+    useCallback(() => {
+      if (authLoading) {
+        return;
+      }
+
+      if (!user?.token) {
+        setNotifications([]);
+        setLoading(false);
+        return;
+      }
+
+      let mounted = true;
+
+      const loadNotifications = async () => {
+        try {
+          setLoading(true);
+          setError(null);
+
+          const response = await ApiService.getNotifications(user.token);
+
+          if (mounted) {
+            setNotifications(response.data.notifications);
+          }
+        } catch (loadError) {
+          console.error('Notifications: failed to load notifications', loadError);
+
+          if (mounted) {
+            setError('Не удалось загрузить уведомления.');
+          }
+        } finally {
+          if (mounted) {
+            setLoading(false);
+          }
+        }
+      };
+
+      void loadNotifications();
+
+      return () => {
+        mounted = false;
+      };
+    }, [authLoading, user?.token]),
+  );
+
+  const notificationItems = useMemo<NotificationItem[]>(() => {
+    return notifications.map((item) => {
+      const visual = getNotificationVisual(item);
+
+      return {
+        id: item.id,
+        title: item.title,
+        message: item.message,
+        time: getNotificationTime(item.created_at),
+        type: visual.type,
+        icon: visual.icon,
+        iconBg: visual.iconBg,
+        iconColor: visual.iconColor,
+        isRead: item.read_at !== null,
+        section: getNotificationSection(item.created_at),
+        opacity: item.read_at !== null ? 0.85 : 1,
+        orderId: item.order_id,
+      };
+    });
+  }, [notifications]);
+
   const filteredNotifications = useMemo(() => {
-    if (activeCategory === 'Все') return NOTIFICATIONS;
-    
-    const categoryMap: Record<Exclude<NotificationType, 'Все'>, string> = {
-      'Заказы': 'order',
-      'Акции': 'promo',
-      'Новости': 'news'
+    if (activeCategory === 'Все') {
+      return notificationItems;
+    }
+
+    const categoryMap: Record<Exclude<NotificationType, 'Все'>, NotificationItem['type']> = {
+      Заказы: 'order',
+      Акции: 'promo',
+      Новости: 'news',
     };
-    
-    return NOTIFICATIONS.filter(n => n.type === categoryMap[activeCategory as keyof typeof categoryMap]);
-  }, [activeCategory]);
+
+    return notificationItems.filter(
+      (notification) => notification.type === categoryMap[activeCategory],
+    );
+  }, [activeCategory, notificationItems]);
 
   const sections = ['Сегодня', 'Вчера', 'Ранее'] as const;
 
-  const renderNotification = (item: Notification) => (
-    <TouchableOpacity 
-      key={item.id} 
+  const handleNotificationPress = async (item: NotificationItem) => {
+    if (!user?.token) {
+      return;
+    }
+
+    if (!item.isRead) {
+      try {
+        setUpdatingNotificationId(item.id);
+
+        const response = await ApiService.markNotificationAsRead(item.id, user.token);
+
+        setNotifications((current) =>
+          current.map((notification) =>
+            notification.id === item.id
+              ? {
+                  ...notification,
+                  read_at: response.data.read_at,
+                }
+              : notification,
+          ),
+        );
+      } catch (readError) {
+        console.error('Notifications: failed to mark notification as read', readError);
+      } finally {
+        setUpdatingNotificationId(null);
+      }
+    }
+
+    if (item.type === 'order' && item.orderId !== null) {
+      router.push(`/order/${item.orderId}`);
+    }
+  };
+
+  const handleMarkAllAsRead = async () => {
+    if (!user?.token || markingAll) {
+      return;
+    }
+
+    const hasUnread = notifications.some((notification) => notification.read_at === null);
+
+    if (!hasUnread) {
+      return;
+    }
+
+    try {
+      setMarkingAll(true);
+
+      await ApiService.markAllNotificationsAsRead(user.token);
+
+      const readAt = new Date().toISOString();
+
+      setNotifications((current) =>
+        current.map((notification) => ({
+          ...notification,
+          read_at: notification.read_at ?? readAt,
+        })),
+      );
+    } catch (readError) {
+      console.error('Notifications: failed to mark all as read', readError);
+    } finally {
+      setMarkingAll(false);
+    }
+  };
+
+  const renderNotification = (item: NotificationItem) => (
+    <TouchableOpacity
+      key={item.id}
       activeOpacity={0.7}
+      onPress={() => void handleNotificationPress(item)}
+      disabled={updatingNotificationId === item.id}
       style={[
-        styles.notificationCard, 
-        { 
-          backgroundColor: colors.surface, 
+        styles.notificationCard,
+        {
+          backgroundColor: colors.surface,
           borderColor: colorScheme === 'light' ? 'transparent' : colors.border,
-          opacity: item.opacity || 1
-        }
+          opacity: item.opacity || 1,
+        },
       ]}
     >
-      {!item.isRead && (
-        <View style={[styles.unreadDot, { backgroundColor: colors.primary }]} />
-      )}
+      {!item.isRead && <View style={[styles.unreadDot, { backgroundColor: colors.primary }]} />}
       <View style={styles.cardContent}>
         <View style={[styles.iconContainer, { backgroundColor: item.iconBg[colorScheme] }]}>
           <IconSymbol name={item.icon as any} size={24} color={item.iconColor} />
         </View>
-        
+
         <View style={styles.textContainer}>
           <View style={styles.cardHeader}>
-            <Text style={[styles.title, { color: colors.text }]} numberOfLines={1}>{item.title}</Text>
+            <Text style={[styles.title, { color: colors.text }]} numberOfLines={1}>
+              {item.title}
+            </Text>
             <Text style={[styles.time, { color: colors.textSub }]}>{item.time}</Text>
           </View>
           <Text style={[styles.message, { color: colors.textSub }]} numberOfLines={2}>
@@ -195,33 +380,53 @@ export default function NotificationsScreen() {
   return (
     <ThemedView style={styles.container}>
       <Stack.Screen options={{ headerShown: false }} />
-      
+
       {/* Top App Bar */}
-      <View style={[styles.appBar, { paddingTop: insets.top + 12, backgroundColor: colors.background + 'E6', borderBottomColor: colors.border + '80' }]}>
+      <View
+        style={[
+          styles.appBar,
+          {
+            paddingTop: insets.top + 12,
+            backgroundColor: colors.background + 'E6',
+            borderBottomColor: colors.border + '80',
+          },
+        ]}
+      >
         <View style={styles.appBarContent}>
-          <TouchableOpacity 
-            onPress={() => router.back()}
-            style={styles.backButton}
-          >
+          <TouchableOpacity onPress={() => router.back()} style={styles.backButton}>
             <IconSymbol name="chevron.left" size={24} color={colors.text} />
           </TouchableOpacity>
           <Text style={[styles.headerTitle, { color: colors.text }]}>Уведомления</Text>
-          <TouchableOpacity activeOpacity={0.7}>
-            <Text style={[styles.readAllText, { color: colors.primaryDark }]}>Все прочитано</Text>
+          <TouchableOpacity
+            activeOpacity={0.7}
+            onPress={() => void handleMarkAllAsRead()}
+            disabled={markingAll}
+          >
+            <Text
+              style={[
+                styles.readAllText,
+                {
+                  color: colors.primaryDark,
+                  opacity: markingAll ? 0.5 : 1,
+                },
+              ]}
+            >
+              {markingAll ? 'Подождите...' : 'Все прочитано'}
+            </Text>
           </TouchableOpacity>
         </View>
       </View>
 
-      <ScrollView 
+      <ScrollView
         showsVerticalScrollIndicator={false}
         stickyHeaderIndices={[0]}
         contentContainerStyle={{ paddingBottom: insets.bottom + 80 }}
       >
         {/* Chips / Tabs (Sticky) */}
         <View style={[styles.chipsContainer, { backgroundColor: colors.background }]}>
-          <ScrollView 
-            horizontal 
-            showsHorizontalScrollIndicator={false} 
+          <ScrollView
+            horizontal
+            showsHorizontalScrollIndicator={false}
             contentContainerStyle={styles.chipsScroll}
           >
             {CATEGORIES.map((category) => {
@@ -232,13 +437,19 @@ export default function NotificationsScreen() {
                   onPress={() => setActiveCategory(category)}
                   style={[
                     styles.chip,
-                    isActive ? { backgroundColor: colors.primary, borderColor: colors.primary } : { backgroundColor: colors.surface, borderColor: colors.border }
+                    isActive
+                      ? { backgroundColor: colors.primary, borderColor: colors.primary }
+                      : { backgroundColor: colors.surface, borderColor: colors.border },
                   ]}
                 >
-                  <Text style={[
-                    styles.chipText,
-                    isActive ? { color: '#000', fontWeight: '700' } : { color: colors.text, fontWeight: '500' }
-                  ]}>
+                  <Text
+                    style={[
+                      styles.chipText,
+                      isActive
+                        ? { color: '#000', fontWeight: '700' }
+                        : { color: colors.text, fontWeight: '500' },
+                    ]}
+                  >
                     {category}
                   </Text>
                 </TouchableOpacity>
@@ -248,17 +459,35 @@ export default function NotificationsScreen() {
         </View>
 
         <View style={styles.listContainer}>
-          {filteredNotifications.length > 0 ? (
-            sections.map(section => {
-              const sectionItems = filteredNotifications.filter(n => n.section === section);
+          {loading ? (
+            <View style={styles.emptyState}>
+              <ActivityIndicator size="large" color={colors.primary} />
+
+              <Text style={[styles.emptyText, { color: colors.textSub }]}>
+                Загрузка уведомлений...
+              </Text>
+            </View>
+          ) : error ? (
+            <View style={styles.emptyState}>
+              <IconSymbol name="bell.slash.fill" size={48} color={colors.textSub} />
+
+              <Text style={[styles.emptyTitle, { color: colors.text }]}>
+                Не удалось загрузить уведомления
+              </Text>
+
+              <Text style={[styles.emptyText, { color: colors.textSub }]}>{error}</Text>
+            </View>
+          ) : filteredNotifications.length > 0 ? (
+            sections.map((section) => {
+              const sectionItems = filteredNotifications.filter((n) => n.section === section);
               if (sectionItems.length === 0) return null;
 
               return (
                 <View key={section} style={styles.sectionContainer}>
-                  <Text style={[styles.sectionTitle, { color: colors.textSub }]}>{section.toUpperCase()}</Text>
-                  <View style={styles.sectionGap}>
-                    {sectionItems.map(renderNotification)}
-                  </View>
+                  <Text style={[styles.sectionTitle, { color: colors.textSub }]}>
+                    {section.toUpperCase()}
+                  </Text>
+                  <View style={styles.sectionGap}>{sectionItems.map(renderNotification)}</View>
                 </View>
               );
             })

@@ -208,4 +208,12 @@ class Product extends Model implements HasMedia
 
         return $clone;
     }
+
+    public function favoritedByCustomers(): BelongsToMany
+    {
+        return $this->belongsToMany(
+            Customer::class,
+            'customer_favorites'
+        )->withTimestamps();
+    }
 }

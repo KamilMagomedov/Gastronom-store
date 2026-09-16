@@ -21,6 +21,7 @@ use App\Http\Controllers\Api\V1\StaticPageController;
 use App\Http\Controllers\Api\V1\SupportController;
 use App\Http\Middleware\OptionalSanctumMiddleware;
 use Illuminate\Support\Facades\Route;
+use App\Http\Controllers\Api\V1\FavoriteController;
 
 /**
  * @apiDefine NotFoundError
@@ -1426,6 +1427,38 @@ Route::prefix('v1')
          */
         Route::singleton('profile', CustomerController::class)
             ->middleware('auth:customers');
+
+        Route::middleware('auth:customers')->group(function () {
+            Route::get(
+                'favorites',
+                [FavoriteController::class, 'index']
+            );
+
+            Route::post(
+                'favorites/{product}',
+                [FavoriteController::class, 'store']
+            );
+
+            Route::delete(
+                'favorites/{product}',
+                [FavoriteController::class, 'destroy']
+            );
+
+            Route::get(
+                'notifications',
+                [\App\Http\Controllers\Api\V1\NotificationController::class, 'index']
+            );
+
+            Route::patch(
+                'notifications/read-all',
+                [\App\Http\Controllers\Api\V1\NotificationController::class, 'markAllAsRead']
+            );
+
+            Route::patch(
+                'notifications/{notification}/read',
+                [\App\Http\Controllers\Api\V1\NotificationController::class, 'markAsRead']
+            );
+        });
 
         /**
          * @api {get} /v1/settings Get application settings

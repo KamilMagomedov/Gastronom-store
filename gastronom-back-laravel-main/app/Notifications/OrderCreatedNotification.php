@@ -14,11 +14,13 @@ class OrderCreatedNotification extends Notification implements ShouldQueue
 
     public function __construct(
         public Order $order
-    ) {}
+    ) {
+        $this->afterCommit();
+    }
 
     public function via(object $notifiable): array
     {
-        return ['mail'];
+        return ['mail', 'database'];
     }
 
     public function toMail(object $notifiable): MailMessage
@@ -51,4 +53,16 @@ class OrderCreatedNotification extends Notification implements ShouldQueue
             ->line('')
             ->line('Спасибо, что выбрали наш сервис!');
     }
+
+    public function toDatabase(object $notifiable): array
+{
+    return [
+        'type' => 'order',
+        'event' => 'created',
+        'order_id' => $this->order->id,
+        'title' => 'Заказ №'.$this->order->id.' создан',
+        'message' => 'Ваш заказ успешно создан и ожидает обработки.',
+        'status' => $this->order->status,
+    ];
+}
 }

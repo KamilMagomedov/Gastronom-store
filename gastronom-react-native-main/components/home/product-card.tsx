@@ -6,6 +6,7 @@ import { Colors } from '@/constants/theme';
 import { useColorScheme } from '@/hooks/use-color-scheme';
 import { useRouter } from 'expo-router';
 import { useCart } from '@/context/cart-context';
+import { useFavorites } from '@/context/favorites-context';
 
 interface Product {
   id: string;
@@ -16,26 +17,51 @@ interface Product {
   unit: string;
   image: string;
   discount?: string;
-  stock?: number;
+
+  stock: number;
+  inStock: boolean;
+  isActive: boolean;
 }
 
-export function ProductCard({ product, horizontal = false, style }: { product: Product; horizontal?: boolean; style?: object }) {
+export function ProductCard({
+  product,
+  horizontal = false,
+  style,
+}: {
+  product: Product;
+  horizontal?: boolean;
+  style?: object;
+}) {
   const colorScheme = useColorScheme() ?? 'light';
   const colors = Colors[colorScheme];
   const router = useRouter();
   const { getQuantity, addToCart, updateQuantity } = useCart();
-  
+  const { isFavorite, toggleFavorite, isUpdating } = useFavorites();
+
   const productId = Number(product.id);
+  const favorite = isFavorite(productId);
+  const favoriteUpdating = isUpdating(productId);
   const qty = getQuantity(productId);
 
-  const stockAvailable = product.stock ?? 999;
-  const isOutOfStock = stockAvailable <= 0;
-  const isLimitReached = qty >= stockAvailable;
+  const stockAvailable = product.stock;
+  const isOutOfStock = !product.isActive || !product.inStock || stockAvailable <= 0;
+
+  const isLimitReached = isOutOfStock || qty >= stockAvailable;
+
+  const handleFavorite = (e: any) => {
+    e.stopPropagation();
+
+    if (favoriteUpdating) {
+      return;
+    }
+
+    void toggleFavorite(productId);
+  };
 
   const handlePress = () => {
     router.push({
       pathname: '/product/[id]',
-      params: { id: product.slug }
+      params: { id: product.slug },
     });
   };
 
@@ -59,27 +85,52 @@ export function ProductCard({ product, horizontal = false, style }: { product: P
   if (horizontal) {
     return (
       <TouchableOpacity
-        style={[styles.hContainer, { backgroundColor: colors.surface }, isOutOfStock && styles.disabledCard]}
+        style={[
+          styles.hContainer,
+          { backgroundColor: colors.surface },
+          isOutOfStock && styles.disabledCard,
+        ]}
         onPress={handlePress}
         disabled={isOutOfStock}
       >
-        <View style={[styles.hImageContainer, { backgroundColor: colorScheme === 'light' ? '#F9FAFB' : '#1F2937' }]}>
+        <View
+          style={[
+            styles.hImageContainer,
+            { backgroundColor: colorScheme === 'light' ? '#F9FAFB' : '#1F2937' },
+          ]}
+        >
           {product.discount && (
             <View style={styles.discountBadge}>
               <Text style={styles.discountText}>{product.discount}</Text>
             </View>
           )}
-          {product.image
-            ? <Image source={{ uri: product.image }} style={[styles.hImage, isOutOfStock && styles.blurImage]} resizeMode="contain" />
-            : <ProductImagePlaceholder size="small" />
-          }
-          <TouchableOpacity style={styles.favoriteButton}>
-            <IconSymbol name="heart" size={16} color={colors.textSub} />
+          {product.image ? (
+            <Image
+              source={{ uri: product.image }}
+              style={[styles.hImage, isOutOfStock && styles.blurImage]}
+              resizeMode="contain"
+            />
+          ) : (
+            <ProductImagePlaceholder size="small" />
+          )}
+          <TouchableOpacity
+            style={[styles.favoriteButton, favoriteUpdating && { opacity: 0.5 }]}
+            onPress={handleFavorite}
+            disabled={favoriteUpdating}
+          >
+            <IconSymbol
+              name={favorite ? 'heart.fill' : 'heart'}
+              size={16}
+              color={favorite ? '#ef4444' : colors.textSub}
+            />
           </TouchableOpacity>
         </View>
         <View style={styles.hInfo}>
           <View>
-            <Text style={[styles.name, { color: isOutOfStock ? '#9ca3af' : colors.text }]} numberOfLines={1}>
+            <Text
+              style={[styles.name, { color: isOutOfStock ? '#9ca3af' : colors.text }]}
+              numberOfLines={1}
+            >
               {product.name}
             </Text>
             <Text style={[styles.unit, { color: colors.textSub }]}>
@@ -88,12 +139,12 @@ export function ProductCard({ product, horizontal = false, style }: { product: P
           </View>
           <View style={styles.hFooter}>
             <View>
-              <Text style={[styles.price, { color: isOutOfStock ? '#9ca3af' : colors.text }]}>{product.price}₽</Text>
-              {product.oldPrice && (
-                <Text style={styles.oldPrice}>{product.oldPrice}₽</Text>
-              )}
+              <Text style={[styles.price, { color: isOutOfStock ? '#9ca3af' : colors.text }]}>
+                {product.price}₽
+              </Text>
+              {product.oldPrice && <Text style={styles.oldPrice}>{product.oldPrice}₽</Text>}
             </View>
-            
+
             {isOutOfStock ? (
               <View style={[styles.outOfStockBadge]}>
                 <Text style={styles.outOfStockText}>Закончился</Text>
@@ -111,12 +162,16 @@ export function ProductCard({ product, horizontal = false, style }: { product: P
                   <IconSymbol name="minus" size={16} color="#102216" />
                 </TouchableOpacity>
                 <Text style={styles.stepperQty}>{qty}</Text>
-                <TouchableOpacity 
-                  style={[styles.stepperBtn, isLimitReached && styles.disabledBtn]} 
+                <TouchableOpacity
+                  style={[styles.stepperBtn, isLimitReached && styles.disabledBtn]}
                   onPress={handleIncrease}
                   disabled={isLimitReached}
                 >
-                  <IconSymbol name="plus" size={16} color={isLimitReached ? '#9ca3af' : '#102216'} />
+                  <IconSymbol
+                    name="plus"
+                    size={16}
+                    color={isLimitReached ? '#9ca3af' : '#102216'}
+                  />
                 </TouchableOpacity>
               </View>
             )}
@@ -126,37 +181,64 @@ export function ProductCard({ product, horizontal = false, style }: { product: P
     );
   }
 
-  // Вертикальная карточка
   return (
     <TouchableOpacity
-      style={[styles.vContainer, { backgroundColor: colors.surface }, style, isOutOfStock && styles.disabledCard]}
+      style={[
+        styles.vContainer,
+        { backgroundColor: colors.surface },
+        style,
+        isOutOfStock && styles.disabledCard,
+      ]}
       onPress={handlePress}
     >
-      <View style={[styles.vImageContainer, { backgroundColor: colorScheme === 'light' ? '#F9FAFB' : '#1F2937' }]}>
+      <View
+        style={[
+          styles.vImageContainer,
+          { backgroundColor: colorScheme === 'light' ? '#F9FAFB' : '#1F2937' },
+        ]}
+      >
         {product.discount && (
           <View style={styles.discountBadge}>
             <Text style={styles.discountText}>{product.discount}</Text>
           </View>
         )}
-        {product.image
-          ? <Image source={{ uri: product.image }} style={[styles.vImage, isOutOfStock && styles.blurImage]} resizeMode="contain" />
-          : <ProductImagePlaceholder size="large" />
-        }
-        <TouchableOpacity style={styles.vFavoriteButton}>
-          <IconSymbol name="heart" size={18} color={colors.textSub} />
+        {product.image ? (
+          <Image
+            source={{ uri: product.image }}
+            style={[styles.vImage, isOutOfStock && styles.blurImage]}
+            resizeMode="contain"
+          />
+        ) : (
+          <ProductImagePlaceholder size="large" />
+        )}
+        <TouchableOpacity
+          style={[styles.vFavoriteButton, favoriteUpdating && { opacity: 0.5 }]}
+          onPress={handleFavorite}
+          disabled={favoriteUpdating}
+        >
+          <IconSymbol
+            name={favorite ? 'heart.fill' : 'heart'}
+            size={18}
+            color={favorite ? '#ef4444' : colors.textSub}
+          />
         </TouchableOpacity>
       </View>
       <View style={styles.vInfo}>
-        <Text style={[styles.name, { color: isOutOfStock ? '#9ca3af' : colors.text }]} numberOfLines={1}>{product.name}</Text>
+        <Text
+          style={[styles.name, { color: isOutOfStock ? '#9ca3af' : colors.text }]}
+          numberOfLines={1}
+        >
+          {product.name}
+        </Text>
         <Text style={[styles.unit, { color: colors.textSub }]}>
           {isOutOfStock ? 'Нет в наличии' : product.unit}
         </Text>
         <View style={styles.vFooter}>
           <View>
-            <Text style={[styles.price, { color: isOutOfStock ? '#9ca3af' : colors.text }]}>{product.price}₽</Text>
-            {product.oldPrice && (
-              <Text style={styles.oldPrice}>{product.oldPrice}₽</Text>
-            )}
+            <Text style={[styles.price, { color: isOutOfStock ? '#9ca3af' : colors.text }]}>
+              {product.price}₽
+            </Text>
+            {product.oldPrice && <Text style={styles.oldPrice}>{product.oldPrice}₽</Text>}
           </View>
 
           {isOutOfStock ? (
@@ -176,8 +258,8 @@ export function ProductCard({ product, horizontal = false, style }: { product: P
                 <IconSymbol name="minus" size={14} color="#102216" />
               </TouchableOpacity>
               <Text style={styles.stepperQty}>{qty}</Text>
-              <TouchableOpacity 
-                style={[styles.vStepperBtn, isLimitReached && styles.disabledBtn]} 
+              <TouchableOpacity
+                style={[styles.vStepperBtn, isLimitReached && styles.disabledBtn]}
                 onPress={handleIncrease}
                 disabled={isLimitReached}
               >
@@ -380,5 +462,5 @@ const styles = StyleSheet.create({
     color: '#9ca3af',
     fontSize: 12,
     fontWeight: '600',
-  }
+  },
 });

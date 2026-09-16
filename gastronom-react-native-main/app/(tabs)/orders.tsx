@@ -1,9 +1,4 @@
-import React, {
-  useCallback,
-  useEffect,
-  useMemo,
-  useState,
-} from 'react';
+import React, { useCallback, useEffect, useMemo, useState } from 'react';
 
 import {
   ActivityIndicator,
@@ -25,20 +20,11 @@ import { Colors } from '@/constants/theme';
 import { useColorScheme } from '@/hooks/use-color-scheme';
 import { useAuth } from '@/context/auth-context';
 
-import {
-  ApiOrder,
-  ApiService,
-} from '@/services/api';
+import { ApiOrder, ApiService } from '@/services/api';
 
 type OrderFilter = 'active' | 'history';
 
-const ACTIVE_STATUSES = new Set([
-  'pending',
-  'confirmed',
-  'preparing',
-  'ready',
-  'delivering',
-]);
+const ACTIVE_STATUSES = new Set(['pending', 'confirmed', 'preparing', 'ready', 'delivering']);
 
 const STATUS_CONFIG: Record<
   string,
@@ -164,13 +150,9 @@ export default function OrdersScreen() {
   const colorScheme = useColorScheme() ?? 'light';
   const colors = Colors[colorScheme];
 
-  const {
-    user,
-    isLoading: authLoading,
-  } = useAuth();
+  const { user, isLoading: authLoading } = useAuth();
 
-  const [filter, setFilter] =
-    useState<OrderFilter>('active');
+  const [filter, setFilter] = useState<OrderFilter>('active');
 
   const [orders, setOrders] = useState<ApiOrder[]>([]);
 
@@ -178,17 +160,12 @@ export default function OrdersScreen() {
   const [hasMore, setHasMore] = useState(false);
 
   const [loading, setLoading] = useState(true);
-  const [loadingMore, setLoadingMore] =
-    useState(false);
+  const [loadingMore, setLoadingMore] = useState(false);
 
-  const [error, setError] =
-    useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null);
 
   const loadOrders = useCallback(
-    async (
-      pageToLoad = 1,
-      append = false,
-    ) => {
+    async (pageToLoad = 1, append = false) => {
       if (!user?.token) {
         return;
       }
@@ -202,30 +179,18 @@ export default function OrdersScreen() {
       setError(null);
 
       try {
-        const response =
-          await ApiService.getOrders(
-            user.token,
-            pageToLoad,
-            20,
-          );
+        const response = await ApiService.getOrders(user.token, pageToLoad, 20);
 
         setOrders((currentOrders) =>
-          append
-            ? [...currentOrders, ...response.data]
-            : response.data,
+          append ? [...currentOrders, ...response.data] : response.data,
         );
 
         setPage(response.paginator.current_page);
         setHasMore(response.paginator.has_more);
       } catch (loadError) {
-        console.error(
-          'Orders: failed to load orders',
-          loadError,
-        );
+        console.error('Orders: failed to load orders', loadError);
 
-        setError(
-          'Не удалось загрузить заказы. Попробуйте ещё раз.',
-        );
+        setError('Не удалось загрузить заказы. Попробуйте ещё раз.');
       } finally {
         if (append) {
           setLoadingMore(false);
@@ -249,29 +214,18 @@ export default function OrdersScreen() {
     }
 
     loadOrders(1);
-  }, [
-    authLoading,
-    user?.token,
-    loadOrders,
-  ]);
+  }, [authLoading, user?.token, loadOrders]);
 
   const filteredOrders = useMemo(() => {
     return orders.filter((order) => {
-      const isActive =
-        ACTIVE_STATUSES.has(order.status);
+      const isActive = ACTIVE_STATUSES.has(order.status);
 
-      return filter === 'active'
-        ? isActive
-        : !isActive;
+      return filter === 'active' ? isActive : !isActive;
     });
   }, [orders, filter]);
 
   const loadMore = async () => {
-    if (
-      loadingMore ||
-      loading ||
-      !hasMore
-    ) {
+    if (loadingMore || loading || !hasMore) {
       return;
     }
 
@@ -279,15 +233,8 @@ export default function OrdersScreen() {
   };
 
   return (
-    <ThemedView
-      style={[
-        styles.container,
-        { paddingTop: insets.top },
-      ]}
-    >
-      <Stack.Screen
-        options={{ headerShown: false }}
-      />
+    <ThemedView style={[styles.container, { paddingTop: insets.top }]}>
+      <Stack.Screen options={{ headerShown: false }} />
 
       <View
         style={[
@@ -299,38 +246,25 @@ export default function OrdersScreen() {
       >
         <TouchableOpacity
           style={styles.backButton}
-          onPress={() => router.back()}
+          onPress={() => router.replace('/(tabs)/profile')}
         >
-          <IconSymbol
-            name="chevron.left"
-            size={24}
-            color={colors.text}
-          />
+          <IconSymbol name="chevron.left" size={24} color={colors.text} />
         </TouchableOpacity>
 
-        <ThemedText style={styles.headerTitle}>
-          История заказов
-        </ThemedText>
+        <ThemedText style={styles.headerTitle}>История заказов</ThemedText>
 
         <View style={{ width: 40 }} />
       </View>
 
       <ScrollView
-        contentContainerStyle={
-          styles.scrollContent
-        }
+        contentContainerStyle={styles.scrollContent}
         showsVerticalScrollIndicator={false}
         onScroll={({ nativeEvent }) => {
           const isCloseToBottom =
-            nativeEvent.layoutMeasurement.height +
-              nativeEvent.contentOffset.y >=
+            nativeEvent.layoutMeasurement.height + nativeEvent.contentOffset.y >=
             nativeEvent.contentSize.height - 40;
 
-          if (
-            isCloseToBottom &&
-            hasMore &&
-            !loadingMore
-          ) {
+          if (isCloseToBottom && hasMore && !loadingMore) {
             loadMore();
           }
         }}
@@ -341,26 +275,18 @@ export default function OrdersScreen() {
             style={[
               styles.filterBg,
               {
-                backgroundColor:
-                  colorScheme === 'dark'
-                    ? '#1a3825'
-                    : '#e5e7eb',
+                backgroundColor: colorScheme === 'dark' ? '#1a3825' : '#e5e7eb',
               },
             ]}
           >
             <TouchableOpacity
-              onPress={() =>
-                setFilter('active')
-              }
+              onPress={() => setFilter('active')}
               style={[
                 styles.filterItem,
                 filter === 'active' && [
                   styles.filterItemSelected,
                   {
-                    backgroundColor:
-                      colorScheme === 'dark'
-                        ? '#2d4f38'
-                        : colors.surface,
+                    backgroundColor: colorScheme === 'dark' ? '#2d4f38' : colors.surface,
                   },
                 ],
               ]}
@@ -380,18 +306,13 @@ export default function OrdersScreen() {
             </TouchableOpacity>
 
             <TouchableOpacity
-              onPress={() =>
-                setFilter('history')
-              }
+              onPress={() => setFilter('history')}
               style={[
                 styles.filterItem,
                 filter === 'history' && [
                   styles.filterItemSelected,
                   {
-                    backgroundColor:
-                      colorScheme === 'dark'
-                        ? '#2d4f38'
-                        : colors.surface,
+                    backgroundColor: colorScheme === 'dark' ? '#2d4f38' : colors.surface,
                   },
                 ],
               ]}
@@ -415,37 +336,21 @@ export default function OrdersScreen() {
         <View style={styles.listContainer}>
           {loading ? (
             <View style={styles.loaderContainer}>
-              <ActivityIndicator
-                size="small"
-                color={colors.primaryDark}
-              />
+              <ActivityIndicator size="small" color={colors.primaryDark} />
 
-              <ThemedText
-                style={[
-                  styles.loaderText,
-                  { color: colors.textSub },
-                ]}
-              >
+              <ThemedText style={[styles.loaderText, { color: colors.textSub }]}>
                 Загружаем заказы...
               </ThemedText>
             </View>
           ) : error ? (
             <View style={styles.emptyContainer}>
-              <ThemedText
-                style={[
-                  styles.errorText,
-                  { color: colors.textSub },
-                ]}
-              >
-                {error}
-              </ThemedText>
+              <ThemedText style={[styles.errorText, { color: colors.textSub }]}>{error}</ThemedText>
 
               <TouchableOpacity
                 style={[
                   styles.retryButton,
                   {
-                    borderColor:
-                      colors.primaryDark,
+                    borderColor: colors.primaryDark,
                   },
                 ]}
                 onPress={() => loadOrders(1)}
@@ -454,8 +359,7 @@ export default function OrdersScreen() {
                   style={[
                     styles.retryText,
                     {
-                      color:
-                        colors.primaryDark,
+                      color: colors.primaryDark,
                     },
                   ]}
                 >
@@ -465,14 +369,11 @@ export default function OrdersScreen() {
             </View>
           ) : filteredOrders.length > 0 ? (
             filteredOrders.map((order) => {
-              const status =
-                getStatusConfig(order.status);
+              const status = getStatusConfig(order.status);
 
-              const summary =
-                order.order_summary;
+              const summary = order.order_summary;
 
-              const isCancelled =
-                order.status === 'cancelled';
+              const isCancelled = order.status === 'cancelled';
 
               return (
                 <View
@@ -480,64 +381,37 @@ export default function OrdersScreen() {
                   style={[
                     styles.card,
                     {
-                      backgroundColor:
-                        colors.surface,
-                      borderColor:
-                        colors.border,
-                      opacity: isCancelled
-                        ? 0.75
-                        : 1,
+                      backgroundColor: colors.surface,
+                      borderColor: colors.border,
+                      opacity: isCancelled ? 0.75 : 1,
                     },
                   ]}
                 >
-                  <View
-                    style={styles.cardHeader}
-                  >
-                    <View
-                      style={styles.shopInfo}
-                    >
+                  <View style={styles.cardHeader}>
+                    <View style={styles.shopInfo}>
                       <View
                         style={[
                           styles.shopIcon,
                           {
-                            backgroundColor:
-                              status.backgroundColor,
+                            backgroundColor: status.backgroundColor,
                           },
                         ]}
                       >
-                        <IconSymbol
-                          name={
-                            status.icon as any
-                          }
-                          size={20}
-                          color={status.color}
-                        />
+                        <IconSymbol name={status.icon as any} size={20} color={status.color} />
                       </View>
 
-                      <View
-                        style={
-                          styles.headerOrderInfo
-                        }
-                      >
-                        <ThemedText
-                          style={styles.shopName}
-                        >
-                          Домашний гастроном
-                        </ThemedText>
+                      <View style={styles.headerOrderInfo}>
+                        <ThemedText style={styles.shopName}>Домашний гастроном</ThemedText>
 
                         <ThemedText
                           style={[
                             styles.orderMeta,
                             {
-                              color:
-                                colors.textSub,
+                              color: colors.textSub,
                             },
                           ]}
                         >
-                          #{order.id} •{' '}
-                          {formatDate(
-                            order.created_at,
-                          )}
+                          #{order.id} • {formatDate(order.created_at)}
                         </ThemedText>
                       </View>
                     </View>
@@ -546,8 +420,7 @@ export default function OrdersScreen() {
                       style={[
                         styles.statusBadge,
                         {
-                          backgroundColor:
-                            status.backgroundColor,
+                          backgroundColor: status.backgroundColor,
                         },
                       ]}
                     >
@@ -555,8 +428,7 @@ export default function OrdersScreen() {
                         style={[
                           styles.statusText,
                           {
-                            color:
-                              status.color,
+                            color: status.color,
                           },
                         ]}
                       >
@@ -565,17 +437,13 @@ export default function OrdersScreen() {
                     </View>
                   </View>
 
-                  <View
-                    style={styles.cardBody}
-                  >
+                  <View style={styles.cardBody}>
                     {summary?.image ? (
                       <Image
                         source={{
                           uri: summary.image,
                         }}
-                        style={
-                          styles.productImage
-                        }
+                        style={styles.productImage}
                       />
                     ) : (
                       <View
@@ -583,56 +451,32 @@ export default function OrdersScreen() {
                           styles.productPlaceholder,
                           {
                             backgroundColor:
-                              colorScheme ===
-                              'dark'
-                                ? 'rgba(255,255,255,0.05)'
-                                : '#f3f4f6',
+                              colorScheme === 'dark' ? 'rgba(255,255,255,0.05)' : '#f3f4f6',
                           },
                         ]}
                       >
-                        <IconSymbol
-                          name="bag.fill"
-                          size={30}
-                          color={
-                            colors.textSub
-                          }
-                        />
+                        <IconSymbol name="bag.fill" size={30} color={colors.textSub} />
                       </View>
                     )}
 
-                    <View
-                      style={styles.productInfo}
-                    >
-                      <ThemedText
-                        numberOfLines={2}
-                        style={styles.itemsText}
-                      >
-                        {summary?.product_names ||
-                          'Состав заказа недоступен'}
+                    <View style={styles.productInfo}>
+                      <ThemedText numberOfLines={2} style={styles.itemsText}>
+                        {summary?.product_names || 'Состав заказа недоступен'}
                       </ThemedText>
 
                       <ThemedText
                         style={[
                           styles.itemsCount,
                           {
-                            color:
-                              colors.textSub,
+                            color: colors.textSub,
                           },
                         ]}
                       >
-                        {formatProductsCount(
-                          summary?.items_count ??
-                            0,
-                        )}
+                        {formatProductsCount(summary?.items_count ?? 0)}
                       </ThemedText>
 
-                      <ThemedText
-                        style={styles.priceText}
-                      >
-                        {formatPrice(
-                          summary?.total_price ??
-                            order.total_amount,
-                        )}
+                      <ThemedText style={styles.priceText}>
+                        {formatPrice(summary?.total_price ?? order.total_amount)}
                       </ThemedText>
                     </View>
                   </View>
@@ -641,74 +485,41 @@ export default function OrdersScreen() {
                     style={[
                       styles.divider,
                       {
-                        backgroundColor:
-                          colors.border,
+                        backgroundColor: colors.border,
                       },
                     ]}
                   />
 
                   <TouchableOpacity
-                    onPress={() =>
-                      router.push(
-                        `/order/${order.id}`,
-                      )
-                    }
+                    onPress={() => router.push(`/order/${order.id}`)}
                     style={[
                       styles.actionButton,
                       {
                         backgroundColor:
-                          colorScheme === 'dark'
-                            ? 'rgba(255,255,255,0.05)'
-                            : colors.background,
+                          colorScheme === 'dark' ? 'rgba(255,255,255,0.05)' : colors.background,
                       },
                     ]}
                   >
-                    <IconSymbol
-                      name="info.circle.fill"
-                      size={18}
-                      color={colors.text}
-                    />
+                    <IconSymbol name="info.circle.fill" size={18} color={colors.text} />
 
-                    <ThemedText
-                      style={styles.actionText}
-                    >
-                      Подробнее
-                    </ThemedText>
+                    <ThemedText style={styles.actionText}>Подробнее</ThemedText>
                   </TouchableOpacity>
                 </View>
               );
             })
           ) : (
-            <View
-              style={styles.emptyContainer}
-            >
-              <IconSymbol
-                name="bag.fill"
-                size={36}
-                color={colors.textSub}
-              />
+            <View style={styles.emptyContainer}>
+              <IconSymbol name="bag.fill" size={36} color={colors.textSub} />
 
-              <ThemedText
-                style={[
-                  styles.emptyText,
-                  { color: colors.textSub },
-                ]}
-              >
-                {filter === 'active'
-                  ? 'У вас нет активных заказов'
-                  : 'История заказов пока пуста'}
+              <ThemedText style={[styles.emptyText, { color: colors.textSub }]}>
+                {filter === 'active' ? 'У вас нет активных заказов' : 'История заказов пока пуста'}
               </ThemedText>
             </View>
           )}
 
           {loadingMore && (
-            <View
-              style={styles.loaderContainer}
-            >
-              <ActivityIndicator
-                size="small"
-                color={colors.primaryDark}
-              />
+            <View style={styles.loaderContainer}>
+              <ActivityIndicator size="small" color={colors.primaryDark} />
 
               <ThemedText
                 style={[
@@ -723,28 +534,20 @@ export default function OrdersScreen() {
             </View>
           )}
 
-          {!loading &&
-            !loadingMore &&
-            hasMore && (
-              <TouchableOpacity
-                onPress={loadMore}
-                style={
-                  styles.loadMoreButton
-                }
+          {!loading && !loadingMore && hasMore && (
+            <TouchableOpacity onPress={loadMore} style={styles.loadMoreButton}>
+              <ThemedText
+                style={[
+                  styles.loadMoreText,
+                  {
+                    color: colors.primaryDark,
+                  },
+                ]}
               >
-                <ThemedText
-                  style={[
-                    styles.loadMoreText,
-                    {
-                      color:
-                        colors.primaryDark,
-                    },
-                  ]}
-                >
-                  Показать ещё
-                </ThemedText>
-              </TouchableOpacity>
-            )}
+                Показать ещё
+              </ThemedText>
+            </TouchableOpacity>
+          )}
         </View>
 
         <View style={{ height: 40 }} />

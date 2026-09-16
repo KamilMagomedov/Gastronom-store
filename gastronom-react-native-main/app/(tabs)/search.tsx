@@ -9,30 +9,33 @@ import { addSearchQuery } from '@/services/search-history';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import {
-    ActivityIndicator,
-    FlatList,
-    Platform,
-    StyleSheet,
-    Text,
-    TouchableOpacity,
-    View,
+  ActivityIndicator,
+  FlatList,
+  Platform,
+  StyleSheet,
+  Text,
+  TouchableOpacity,
+  View,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
 const LIMIT = 20;
 
-function mapProduct(p: ApiProduct) {
+function mapProduct(item: ApiProduct) {
   return {
-    id: String(p.id),
-    slug: p.slug,
-    name: p.name,
-    price: parseFloat(p.price),
-    oldPrice: p.old_price ? parseFloat(p.old_price) : undefined,
-    discount: p.old_price
-      ? `-${Math.round((1 - parseFloat(p.price) / parseFloat(p.old_price)) * 100)}%`
+    id: String(item.id),
+    slug: item.slug,
+    name: item.name,
+    price: parseFloat(item.price),
+    oldPrice: item.old_price ? parseFloat(item.old_price) : undefined,
+    discount: item.old_price
+      ? `-${Math.round((1 - parseFloat(item.price) / parseFloat(item.old_price)) * 100)}%`
       : undefined,
-    unit: p.unit,
-    image: p.image,
+    unit: item.unit,
+    image: item.image,
+    stock: item.stock_quantity,
+    inStock: item.in_stock,
+    isActive: item.is_active,
   };
 }
 
@@ -67,12 +70,17 @@ export default function SearchScreen() {
     try {
       console.log('Search: Searching for:', trimmed, 'page:', pageNum);
       const res = await ApiService.searchProducts(trimmed, pageNum, LIMIT);
-      console.log('Search: Found', res.data?.length || 0, 'products, total:', res.paginator?.total || 0);
+      console.log(
+        'Search: Found',
+        res.data?.length || 0,
+        'products, total:',
+        res.paginator?.total || 0,
+      );
       if (pageNum === 1) {
         setProducts(res.data);
         setPage(1);
       } else {
-        setProducts(prev => [...prev, ...res.data]);
+        setProducts((prev) => [...prev, ...res.data]);
       }
       setHasMore(res.paginator.has_more);
       setTotal(res.paginator.total);
@@ -125,17 +133,23 @@ export default function SearchScreen() {
     <>
       <SearchHistory />
       {products.length > 0 && (
-        <Text style={[styles.resultsTitle, { color: colors.text }]}>
-          Найдено {total} товаров
-        </Text>
+        <Text style={[styles.resultsTitle, { color: colors.text }]}>Найдено {total} товаров</Text>
       )}
     </>
   );
 
   return (
-    <SafeAreaView style={[styles.container, { backgroundColor: colors.background }]} edges={['top']}>
+    <SafeAreaView
+      style={[styles.container, { backgroundColor: colors.background }]}
+      edges={['top']}
+    >
       {/* Header */}
-      <View style={[styles.header, { backgroundColor: colors.surface, borderBottomColor: colors.border }]}>
+      <View
+        style={[
+          styles.header,
+          { backgroundColor: colors.surface, borderBottomColor: colors.border },
+        ]}
+      >
         <TouchableOpacity style={styles.backBtn} onPress={() => router.back()}>
           <IconSymbol name="chevron.left" size={24} color={colors.text} />
         </TouchableOpacity>
@@ -187,9 +201,7 @@ export default function SearchScreen() {
       )}
 
       {/* No query yet, not loading — show history only */}
-      {!loading && !showEmpty && products.length === 0 && (
-        <SearchHistory />
-      )}
+      {!loading && !showEmpty && products.length === 0 && <SearchHistory />}
     </SafeAreaView>
   );
 }

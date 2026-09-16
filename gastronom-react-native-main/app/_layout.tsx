@@ -5,6 +5,7 @@ import { StatusBar } from 'expo-status-bar';
 import { AuthProvider } from '@/context/auth-context';
 import { CartProvider } from '@/context/cart-context';
 import { ThemeProvider, useTheme } from '@/context/theme-context';
+import { FavoritesProvider } from '@/context/favorites-context';
 
 function RootLayoutNav() {
   const { theme } = useTheme();
@@ -41,9 +42,11 @@ export default function RootLayout() {
   return (
     <ThemeProvider>
       <AuthProvider>
-        <CartProvider>
-          <RootLayoutNav />
-        </CartProvider>
+        <FavoritesProvider>
+          <CartProvider>
+            <RootLayoutNav />
+          </CartProvider>
+        </FavoritesProvider>
       </AuthProvider>
     </ThemeProvider>
   );

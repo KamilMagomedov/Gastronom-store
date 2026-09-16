@@ -1,4 +1,4 @@
-import React, { useEffect, useRef, useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import {
   ActivityIndicator,
   Dimensions,
@@ -20,13 +20,12 @@ import { ProductReviews } from '@/components/product/product-reviews';
 import { ProductBottomBar } from '@/components/product/product-bottom-bar';
 import { ThemedView } from '@/components/themed-view';
 import { IconSymbol } from '@/components/ui/icon-symbol';
-import { ApiService, ApiProductDetail, ApiReview } from '@/services/api';
+import { ApiService, ApiProductDetail, ApiReview, ApiProductAvailability } from '@/services/api';
 import { ProductImagePlaceholder } from '@/components/ui/product-image-placeholder';
 
 const { width: SCREEN_WIDTH, height: SCREEN_HEIGHT } = Dimensions.get('window');
 const IMAGE_HEIGHT = SCREEN_HEIGHT * 0.45;
 
-// ─── Image gallery with dots ────────────────────────────────────────────────
 function ImageGallery({ images, fallback }: { images: string[]; fallback?: string }) {
   const [activeIndex, setActiveIndex] = useState(0);
   const colorScheme = useColorScheme() ?? 'light';
@@ -44,7 +43,13 @@ function ImageGallery({ images, fallback }: { images: string[]; fallback?: strin
       <View style={styles.imageContainer}>
         <ProductImagePlaceholder
           size="large"
-          style={{ width: '100%', height: '100%', borderRadius: 0, borderWidth: 0, flex: undefined }}
+          style={{
+            width: '100%',
+            height: '100%',
+            borderRadius: 0,
+            borderWidth: 0,
+            flex: undefined,
+          }}
         />
       </View>
     );
@@ -85,21 +90,44 @@ function ImageGallery({ images, fallback }: { images: string[]; fallback?: strin
   );
 }
 
-// ─── Skeleton loader ─────────────────────────────────────────────────────────
 function Skeleton({ colors }: { colors: any }) {
   return (
     <View style={styles.skeletonWrap}>
-      <View style={[styles.skeletonBlock, { backgroundColor: colors.surface, height: 28, width: '70%' }]} />
-      <View style={[styles.skeletonBlock, { backgroundColor: colors.surface, height: 20, width: '40%' }]} />
+      <View
+        style={[
+          styles.skeletonBlock,
+          { backgroundColor: colors.surface, height: 28, width: '70%' },
+        ]}
+      />
+      <View
+        style={[
+          styles.skeletonBlock,
+          { backgroundColor: colors.surface, height: 20, width: '40%' },
+        ]}
+      />
       <View style={{ height: 24 }} />
-      <View style={[styles.skeletonBlock, { backgroundColor: colors.surface, height: 16, width: '100%' }]} />
-      <View style={[styles.skeletonBlock, { backgroundColor: colors.surface, height: 16, width: '90%' }]} />
-      <View style={[styles.skeletonBlock, { backgroundColor: colors.surface, height: 16, width: '80%' }]} />
+      <View
+        style={[
+          styles.skeletonBlock,
+          { backgroundColor: colors.surface, height: 16, width: '100%' },
+        ]}
+      />
+      <View
+        style={[
+          styles.skeletonBlock,
+          { backgroundColor: colors.surface, height: 16, width: '90%' },
+        ]}
+      />
+      <View
+        style={[
+          styles.skeletonBlock,
+          { backgroundColor: colors.surface, height: 16, width: '80%' },
+        ]}
+      />
     </View>
   );
 }
 
-// ─── Main screen ─────────────────────────────────────────────────────────────
 export default function ProductScreen() {
   const colorScheme = useColorScheme() ?? 'light';
   const colors = Colors[colorScheme];
@@ -113,6 +141,8 @@ export default function ProductScreen() {
   const [loadingProduct, setLoadingProduct] = useState(true);
   const [loadingReviews, setLoadingReviews] = useState(true);
   const [error, setError] = useState(false);
+  const [availability, setAvailability] = useState<ApiProductAvailability | null>(null);
+  const [loadingAvailability, setLoadingAvailability] = useState(true);
 
   useEffect(() => {
     if (!slug) return;
@@ -122,6 +152,17 @@ export default function ProductScreen() {
       .catch(() => setError(true))
       .finally(() => setLoadingProduct(false));
 
+    ApiService.getProductAvailability(slug)
+      .then((res) => {
+        setAvailability(res.data);
+      })
+      .catch((availabilityError) => {
+        console.error('Product: failed to load availability', availabilityError);
+      })
+      .finally(() => {
+        setLoadingAvailability(false);
+      });
+
     ApiService.getProductReviews(slug)
       .then((res) => {
         setReviews(res.data);
@@ -130,13 +171,17 @@ export default function ProductScreen() {
       .finally(() => setLoadingReviews(false));
   }, [slug]);
 
-  // ── Error state ──────────────────────────────────────────────────────────
   if (error) {
     return (
       <ThemedView style={styles.centerFill}>
         <IconSymbol name="exclamationmark.circle" size={48} color={colors.textSub} />
-        <Text style={[styles.errorText, { color: colors.textSub }]}>Не удалось загрузить товар</Text>
-        <TouchableOpacity onPress={() => router.back()} style={[styles.retryBtn, { backgroundColor: colors.primary }]}>
+        <Text style={[styles.errorText, { color: colors.textSub }]}>
+          Не удалось загрузить товар
+        </Text>
+        <TouchableOpacity
+          onPress={() => router.back()}
+          style={[styles.retryBtn, { backgroundColor: colors.primary }]}
+        >
           <Text style={styles.retryBtnText}>Назад</Text>
         </TouchableOpacity>
       </ThemedView>
@@ -145,11 +190,9 @@ export default function ProductScreen() {
 
   return (
     <ThemedView style={styles.container}>
-      {/* Floating back/favourite buttons — always visible */}
-      <ProductImageHeader image={product?.images?.[0] ?? ''} />
+      <ProductImageHeader productId={product?.id} />
 
       <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={styles.scrollContent}>
-        {/* ── Image gallery ─────────────────────────────────────────────── */}
         {loadingProduct ? (
           <View style={[styles.imageContainer, { backgroundColor: colors.surface }]}>
             <ActivityIndicator color={colors.primary} />
@@ -158,16 +201,19 @@ export default function ProductScreen() {
           <ImageGallery images={product?.images ?? []} />
         )}
 
-        {/* ── Info card ─────────────────────────────────────────────────── */}
         <View style={[styles.infoSection, { backgroundColor: colors.background }]}>
           <View style={[styles.dragHandle, { backgroundColor: colors.border }]} />
 
-          {/* Breadcrumbs */}
           <View style={styles.breadcrumbs}>
             <TouchableOpacity onPress={() => router.push('/(tabs)')} style={styles.breadcrumbItem}>
               <Text style={[styles.breadcrumbText, { color: colors.textSub }]}>Главная</Text>
             </TouchableOpacity>
-            <IconSymbol name="chevron.right" size={10} color={colors.textSub} style={styles.breadcrumbSep} />
+            <IconSymbol
+              name="chevron.right"
+              size={10}
+              color={colors.textSub}
+              style={styles.breadcrumbSep}
+            />
             <Text
               style={[styles.breadcrumbText, { color: colors.text, fontWeight: '600' }]}
               numberOfLines={1}
@@ -176,14 +222,12 @@ export default function ProductScreen() {
             </Text>
           </View>
 
-          {/* SKU badge */}
           {product?.sku ? (
             <View style={[styles.skuBadge, { backgroundColor: colors.surface }]}>
               <Text style={[styles.skuText, { color: colors.textSub }]}>Арт: {product.sku}</Text>
             </View>
           ) : null}
 
-          {/* Price / rating */}
           {loadingProduct ? (
             <Skeleton colors={colors} />
           ) : product ? (
@@ -197,15 +241,15 @@ export default function ProductScreen() {
             />
           ) : null}
 
-          {/* Description */}
           {product?.description ? (
             <View style={styles.descriptionSection}>
               <Text style={[styles.sectionTitle, { color: colors.text }]}>Описание</Text>
-              <Text style={[styles.description, { color: colors.textSub }]}>{product.description}</Text>
+              <Text style={[styles.description, { color: colors.textSub }]}>
+                {product.description}
+              </Text>
             </View>
           ) : null}
 
-          {/* Reviews */}
           <ProductReviews
             productId={slug ?? ''}
             productName={product?.name}
@@ -219,7 +263,12 @@ export default function ProductScreen() {
         </View>
       </ScrollView>
 
-      <ProductBottomBar productId={product?.id} />
+      <ProductBottomBar
+        productId={product?.id}
+        stockQuantity={availability?.stock_quantity}
+        available={availability?.available}
+        loadingAvailability={loadingAvailability}
+      />
     </ThemedView>
   );
 }
@@ -228,8 +277,6 @@ const styles = StyleSheet.create({
   container: { flex: 1 },
   centerFill: { flex: 1, alignItems: 'center', justifyContent: 'center', gap: 16, padding: 24 },
   scrollContent: { flexGrow: 1 },
-
-  // Gallery
   imageContainer: {
     height: IMAGE_HEIGHT,
     width: '100%',
@@ -259,8 +306,6 @@ const styles = StyleSheet.create({
     borderRadius: 3,
     width: 6,
   },
-
-  // Info card
   infoSection: {
     flex: 1,
     marginTop: -32,
@@ -285,7 +330,6 @@ const styles = StyleSheet.create({
   breadcrumbItem: { paddingVertical: 4 },
   breadcrumbSep: { marginHorizontal: 4 },
   breadcrumbText: { fontSize: 12 },
-
   skuBadge: {
     alignSelf: 'flex-start',
     paddingHorizontal: 10,
@@ -293,19 +337,42 @@ const styles = StyleSheet.create({
     borderRadius: 8,
     marginBottom: 12,
   },
-  skuText: { fontSize: 12, fontWeight: '500' },
-
-  // Description
-  descriptionSection: { marginBottom: 24 },
-  sectionTitle: { fontSize: 18, fontWeight: '700', marginBottom: 12 },
-  description: { fontSize: 15, lineHeight: 22 },
-
-  // Skeleton
-  skeletonWrap: { gap: 10, marginBottom: 24 },
-  skeletonBlock: { borderRadius: 8 },
-
-  // Error
-  errorText: { fontSize: 16, fontWeight: '500', textAlign: 'center' },
-  retryBtn: { paddingHorizontal: 32, paddingVertical: 12, borderRadius: 16 },
-  retryBtnText: { color: '#0d3b1d', fontWeight: '700', fontSize: 16 },
+  skuText: {
+    fontSize: 12,
+    fontWeight: '500',
+  },
+  descriptionSection: {
+    marginBottom: 24,
+  },
+  sectionTitle: {
+    fontSize: 18,
+    fontWeight: '700',
+    marginBottom: 12,
+  },
+  description: {
+    fontSize: 15,
+    lineHeight: 22,
+  },
+  skeletonWrap: {
+    gap: 10,
+    marginBottom: 24,
+  },
+  skeletonBlock: {
+    borderRadius: 8,
+  },
+  errorText: {
+    fontSize: 16,
+    fontWeight: '500',
+    textAlign: 'center',
+  },
+  retryBtn: {
+    paddingHorizontal: 32,
+    paddingVertical: 12,
+    borderRadius: 16,
+  },
+  retryBtnText: {
+    color: '#0d3b1d',
+    fontWeight: '700',
+    fontSize: 16,
+  },
 });

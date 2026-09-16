@@ -23,7 +23,14 @@ class ProductItemResource extends JsonResource
             'sku' => $this->resource->sku,
             'unit' => $this->resource->unit,
             'image' => $this->resource->getFirstMediaUrl('images'),
-            'category' => CategoryItemResource::make($this->resource->category),
+
+            'in_stock' => $this->resource->in_stock,
+            'stock_quantity' => $this->resource->stock_quantity,
+            'is_active' => $this->resource->is_active,
+
+            'category' => CategoryItemResource::make(
+                $this->resource->category
+            ),
         ];
     }
 }

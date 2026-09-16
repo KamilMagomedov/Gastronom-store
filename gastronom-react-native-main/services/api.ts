@@ -47,6 +47,11 @@ export interface ApiProduct {
   sku: string;
   unit: string;
   image: string;
+
+  in_stock: boolean;
+  stock_quantity: number;
+  is_active: boolean;
+
   category: {
     id: number;
     name: string;
@@ -94,6 +99,21 @@ export interface ApiProductDetail {
     average: number;
     count: number;
   };
+}
+
+export interface ApiProductAvailability {
+  product_id: number;
+  slug: string;
+  name: string;
+  in_stock: boolean;
+  stock_quantity: number;
+  is_active: boolean;
+  available: boolean;
+
+  requested_quantity?: number;
+  is_enough?: boolean;
+  shortage?: number;
+  status?: string;
 }
 
 export interface ApiReview {
@@ -281,10 +301,7 @@ export interface ApiOrdersResponse {
   success: boolean;
 }
 
-async function request<T>(
-  path: string,
-  options: RequestInit = {},
-): Promise<T> {
+async function request<T>(path: string, options: RequestInit = {}): Promise<T> {
   const controller = new AbortController();
   const timeoutId = setTimeout(() => controller.abort(), 15000); // 15 second timeout
 
@@ -393,6 +410,46 @@ export interface UpdateCustomerProfileData {
   delivery_floor?: string | null;
 }
 
+export interface ApiFavoritesResponse {
+  data: ApiProduct[];
+  success: boolean;
+}
+
+export interface ApiNotification {
+  id: string;
+  type: string;
+  event: string | null;
+  order_id: number | null;
+  title: string;
+  message: string;
+  status: string | null;
+  read_at: string | null;
+  created_at: string | null;
+}
+
+export interface ApiNotificationsResponse {
+  data: {
+    notifications: ApiNotification[];
+    unread_count: number;
+  };
+  success: boolean;
+}
+
+export interface ApiNotificationReadResponse {
+  data: {
+    id: string;
+    read_at: string | null;
+  };
+  success: boolean;
+}
+
+export interface ApiNotificationsReadAllResponse {
+  data: {
+    unread_count: number;
+  };
+  success: boolean;
+}
+
 export class ApiService {
   static async register(data: RegistrationData): Promise<AuthResponse> {
     return request<AuthResponse>('/v1/auth/register', {
@@ -447,6 +504,16 @@ export class ApiService {
     return request(`/v1/products/${id}`);
   }
 
+  static async getProductAvailability(slug: string): Promise<{
+    data: ApiProductAvailability;
+    success: boolean;
+  }> {
+    return request<{
+      data: ApiProductAvailability;
+      success: boolean;
+    }>(`/v1/products/${slug}/availability`);
+  }
+
   static async getProductReviews(id: string): Promise<ApiReviewsResponse> {
     return request(`/v1/products/${id}/reviews`);
   }
@@ -458,9 +525,7 @@ export class ApiService {
     });
   }
 
-  static async getProfile(
-    token: string,
-  ): Promise<{
+  static async getProfile(token: string): Promise<{
     data: ApiCustomerProfile;
     success: boolean;
   }> {
@@ -493,6 +558,77 @@ export class ApiService {
     });
   }
 
+  static async getFavorites(token: string): Promise<ApiFavoritesResponse> {
+    return request<ApiFavoritesResponse>('/v1/favorites', {
+      headers: {
+        Authorization: `Bearer ${token}`,
+      },
+    });
+  }
+
+  static async addFavorite(
+    productId: number,
+    token: string,
+  ): Promise<{
+    data: ApiProduct;
+    success: boolean;
+  }> {
+    return request<{
+      data: ApiProduct;
+      success: boolean;
+    }>(`/v1/favorites/${productId}`, {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${token}`,
+      },
+    });
+  }
+
+  static async removeFavorite(
+    productId: number,
+    token: string,
+  ): Promise<{
+    success: boolean;
+  }> {
+    return request<{
+      success: boolean;
+    }>(`/v1/favorites/${productId}`, {
+      method: 'DELETE',
+      headers: {
+        Authorization: `Bearer ${token}`,
+      },
+    });
+  }
+
+  static async getNotifications(token: string): Promise<ApiNotificationsResponse> {
+    return request<ApiNotificationsResponse>('/v1/notifications', {
+      headers: {
+        Authorization: `Bearer ${token}`,
+      },
+    });
+  }
+
+  static async markNotificationAsRead(
+    notificationId: string,
+    token: string,
+  ): Promise<ApiNotificationReadResponse> {
+    return request<ApiNotificationReadResponse>(`/v1/notifications/${notificationId}/read`, {
+      method: 'PATCH',
+      headers: {
+        Authorization: `Bearer ${token}`,
+      },
+    });
+  }
+
+  static async markAllNotificationsAsRead(token: string): Promise<ApiNotificationsReadAllResponse> {
+    return request<ApiNotificationsReadAllResponse>('/v1/notifications/read-all', {
+      method: 'PATCH',
+      headers: {
+        Authorization: `Bearer ${token}`,
+      },
+    });
+  }
+
   static async logout(token: string): Promise<void> {
     await request('/v1/auth/logout', {
       method: 'DELETE',
@@ -501,14 +637,19 @@ export class ApiService {
   }
 
   static async getCart(token?: string, sessionId?: string): Promise<ApiCart> {
-    const params = (!token && sessionId) ? `?session_id=${sessionId}` : '';
+    const params = !token && sessionId ? `?session_id=${sessionId}` : '';
     const res = await request<{ data: ApiCart; success: boolean }>(`/v1/carts${params}`, {
       headers: token ? { Authorization: `Bearer ${token}` } : {},
     });
     return res.data;
   }
 
-  static async addToCart(productId: number, quantity: number, token?: string, sessionId?: string): Promise<ApiCart> {
+  static async addToCart(
+    productId: number,
+    quantity: number,
+    token?: string,
+    sessionId?: string,
+  ): Promise<ApiCart> {
     const res = await request<{ data: ApiCart; success: boolean }>('/v1/carts', {
       method: 'POST',
       body: JSON.stringify({
@@ -521,17 +662,24 @@ export class ApiService {
     return res.data;
   }
 
-  static async removeFromCart(productId: number, token?: string, sessionId?: string): Promise<ApiCart> {
-    const params = (!token && sessionId) ? `?session_id=${sessionId}` : '';
-    const res = await request<{ data: ApiCart; success: boolean }>(`/v1/carts/${productId}${params}`, {
-      method: 'DELETE',
-      headers: token ? { Authorization: `Bearer ${token}` } : {},
-    });
+  static async removeFromCart(
+    productId: number,
+    token?: string,
+    sessionId?: string,
+  ): Promise<ApiCart> {
+    const params = !token && sessionId ? `?session_id=${sessionId}` : '';
+    const res = await request<{ data: ApiCart; success: boolean }>(
+      `/v1/carts/${productId}${params}`,
+      {
+        method: 'DELETE',
+        headers: token ? { Authorization: `Bearer ${token}` } : {},
+      },
+    );
     return res.data;
   }
 
   static async clearCart(token?: string, sessionId?: string): Promise<void> {
-    const params = (!token && sessionId) ? `?session_id=${sessionId}` : '';
+    const params = !token && sessionId ? `?session_id=${sessionId}` : '';
 
     await request(`/v1/carts-clear${params}`, {
       method: 'GET',
@@ -539,8 +687,12 @@ export class ApiService {
     });
   }
 
-  static async createOrder(orderData: CreateOrderData, token?: string, sessionId?: string): Promise<{ data: ApiOrder; success: boolean }> {
-    const params = (!token && sessionId) ? `?session_id=${sessionId}` : '';
+  static async createOrder(
+    orderData: CreateOrderData,
+    token?: string,
+    sessionId?: string,
+  ): Promise<{ data: ApiOrder; success: boolean }> {
+    const params = !token && sessionId ? `?session_id=${sessionId}` : '';
     return request(`/v1/orders${params}`, {
       method: 'POST',
       body: JSON.stringify(orderData),
@@ -548,33 +700,23 @@ export class ApiService {
     });
   }
 
-  static async getOrders(
-    token: string,
-    page = 1,
-    perPage = 20,
-  ): Promise<ApiOrdersResponse> {
-    return request<ApiOrdersResponse>(
-      `/v1/orders?page=${page}&per_page=${perPage}`,
-      {
-        headers: {
-          Authorization: `Bearer ${token}`,
-        },
+  static async getOrders(token: string, page = 1, perPage = 20): Promise<ApiOrdersResponse> {
+    return request<ApiOrdersResponse>(`/v1/orders?page=${page}&per_page=${perPage}`, {
+      headers: {
+        Authorization: `Bearer ${token}`,
       },
-    );
+    });
   }
 
   static async getOrder(
     id: number | string,
     token: string,
   ): Promise<{ data: ApiOrder; success: boolean }> {
-    return request<{ data: ApiOrder; success: boolean }>(
-      `/v1/orders/${id}`,
-      {
-        headers: {
-          Authorization: `Bearer ${token}`,
-        },
+    return request<{ data: ApiOrder; success: boolean }>(`/v1/orders/${id}`, {
+      headers: {
+        Authorization: `Bearer ${token}`,
       },
-    );
+    });
   }
 
   static async cancelOrder(
@@ -582,18 +724,15 @@ export class ApiService {
     reason: string | null,
     token: string,
   ): Promise<{ success: boolean }> {
-    return request<{ success: boolean }>(
-      `/v1/orders/${id}/cancel`,
-      {
-        method: 'PUT',
-        body: JSON.stringify({
-          reason,
-        }),
-        headers: {
-          Authorization: `Bearer ${token}`,
-        },
+    return request<{ success: boolean }>(`/v1/orders/${id}/cancel`, {
+      method: 'PUT',
+      body: JSON.stringify({
+        reason,
+      }),
+      headers: {
+        Authorization: `Bearer ${token}`,
       },
-    );
+    });
   }
 
   static async checkRepeatOrder(

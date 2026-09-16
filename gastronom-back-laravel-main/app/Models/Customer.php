@@ -8,6 +8,7 @@ use Illuminate\Database\Eloquent\Relations\HasMany;
 use Illuminate\Foundation\Auth\User as Authenticatable;
 use Illuminate\Notifications\Notifiable;
 use Laravel\Sanctum\HasApiTokens;
+use Illuminate\Database\Eloquent\Relations\BelongsToMany;
 
 class Customer extends Authenticatable
 {
@@ -58,5 +59,13 @@ class Customer extends Authenticatable
     public function transactions(): HasMany
     {
         return $this->hasMany(Transaction::class);
+    }
+
+    public function favorites(): BelongsToMany
+    {
+        return $this->belongsToMany(
+            Product::class,
+            'customer_favorites'
+        )->withTimestamps();
     }
 }
