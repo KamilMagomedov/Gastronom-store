@@ -193,6 +193,15 @@ export default function NotificationsScreen() {
   const [updatingNotificationId, setUpdatingNotificationId] = useState<string | null>(null);
   const [markingAll, setMarkingAll] = useState(false);
 
+  const handleBack = () => {
+    if (router.canGoBack()) {
+      router.back();
+      return;
+    }
+
+    router.replace('/(tabs)/profile');
+  };
+
   useFocusEffect(
     useCallback(() => {
       if (authLoading) {
@@ -393,7 +402,7 @@ export default function NotificationsScreen() {
         ]}
       >
         <View style={styles.appBarContent}>
-          <TouchableOpacity onPress={() => router.back()} style={styles.backButton}>
+          <TouchableOpacity onPress={handleBack} style={styles.backButton}>
             <IconSymbol name="chevron.left" size={24} color={colors.text} />
           </TouchableOpacity>
           <Text style={[styles.headerTitle, { color: colors.text }]}>Уведомления</Text>
