@@ -55,27 +55,43 @@ class PaymentController extends Controller
         }
     }
 
-    public function webhook(Request $request)
+    public function webhook(Request $request, string $gateway)
     {
         $payload = $request->all();
 
-        Log::info('Payment webhook received', ['payload' => $payload]);
-
-        $gatewayName = $payload['gateway'] ?? $request->header('X-Gateway', '');
+        Log::info('Payment webhook received', [
+            'gateway' => $gateway,
+            'order_id' => $payload['OrderId'] ?? null,
+            'payment_id' => $payload['PaymentId'] ?? null,
+            'status' => $payload['Status'] ?? null,
+        ]);
 
         try {
-            $gateway = $this->paymentManager->resolve($gatewayName);
+            $paymentGateway = $this->paymentManager->resolve($gateway);
 
-            $gateway->handleWebhook($payload);
+            $paymentGateway->handleWebhook($payload);
 
             return response('OK', 200);
-        } catch (\Throwable $e) {
-            Log::error('Payment webhook processing failed', [
+        } catch (PaymentException|\RuntimeException $e) {
+            Log::warning('Payment webhook rejected', [
+                'gateway' => $gateway,
+                'order_id' => $payload['OrderId'] ?? null,
+                'payment_id' => $payload['PaymentId'] ?? null,
+                'status' => $payload['Status'] ?? null,
                 'error' => $e->getMessage(),
-                'payload' => $payload,
             ]);
 
-            return response('OK', 200);
+            return response('ERROR', 400);
+        } catch (\Throwable $e) {
+            Log::error('Payment webhook processing failed', [
+                'gateway' => $gateway,
+                'order_id' => $payload['OrderId'] ?? null,
+                'payment_id' => $payload['PaymentId'] ?? null,
+                'status' => $payload['Status'] ?? null,
+                'error' => $e->getMessage(),
+            ]);
+
+            return response('ERROR', 500);
         }
     }
 

@@ -4,6 +4,7 @@ namespace App\Services\Payment\Gateways;
 
 use App\Models\Order;
 use App\Services\Payment\Contracts\PaymentGateway;
+use App\Models\Transaction;
 
 class TinkoffGateway extends BaseAcquirerGateway implements PaymentGateway
 {
@@ -29,8 +30,11 @@ class TinkoffGateway extends BaseAcquirerGateway implements PaymentGateway
             'Currency' => 643,
             'OrderId' => (string) $order->id,
             'Description' => 'Заказ №'.$order->id,
-            'SuccessURL' => url('/payment/'.$order->id.'/callback'),
-            'FailURL' => url('/payment/'.$order->id.'/callback'),
+            'SuccessURL' => route('api.v1.payments.callback', ['order' => $order->id]),
+            'FailURL' => route('api.v1.payments.callback', ['order' => $order->id]),
+            'NotificationURL' => route('api.payments.webhook', [
+                'gateway' => $this->getGatewayName(),
+            ]),
             'DATA' => [
                 'order_id' => (string) $order->id,
                 'customer_id' => (string) $order->customer_id,
@@ -51,14 +55,80 @@ class TinkoffGateway extends BaseAcquirerGateway implements PaymentGateway
         ];
     }
 
+    private function isValidNotificationToken(array $payload): bool
+    {
+        $receivedToken = $payload['Token'] ?? null;
+
+        if (! is_string($receivedToken) || $receivedToken === '') {
+            return false;
+        }
+
+        $expectedToken = $this->generateToken($payload);
+
+        return hash_equals($expectedToken, $receivedToken);
+    }
+
+    public function handleWebhook(array $payload): Transaction
+    {
+        if (! $this->isValidNotificationToken($payload)) {
+            throw new \RuntimeException('Invalid Tinkoff webhook token');
+        }
+
+        $orderId = $payload['OrderId'] ?? null;
+        $paymentId = $payload['PaymentId'] ?? null;
+
+        if (! $orderId || ! $paymentId) {
+            throw new \RuntimeException('OrderId or PaymentId missing in Tinkoff webhook');
+        }
+
+        $order = Order::findOrFail($orderId);
+
+        $transaction = Transaction::query()
+            ->where('order_id', $order->id)
+            ->where('gateway_transaction_id', (string) $paymentId)
+            ->first();
+
+        if (! $transaction) {
+            $transaction = $order->transactions()->create([
+                'customer_id' => $order->customer_id,
+                'amount' => isset($payload['Amount'])
+                    ? ((int) $payload['Amount']) / 100
+                    : $order->total_amount,
+                'currency' => 'RUB',
+                'payment_method' => 'card',
+                'gateway' => $this->getGatewayName(),
+                'gateway_transaction_id' => (string) $paymentId,
+                'status' => \App\Enums\TransactionStatus::PENDING,
+                'gateway_response' => $payload,
+            ]);
+        } else {
+            $transaction->update([
+                'gateway_response' => $payload,
+            ]);
+        }
+
+        return $this->processWebhookEvent(
+            $transaction,
+            '',
+            $payload
+        );
+    }
+
     protected function processWebhookEvent($transaction, string $event, array $object): \App\Models\Transaction
     {
         $status = $object['Status'] ?? '';
 
         return match ($status) {
-            'CONFIRMED', 'AUTHORIZED' => $this->markAsCompleted($transaction),
-            'REVERSED', 'REJECTED', 'REFUNDED' => $this->markAsFailed($transaction, $object['Message'] ?? 'Payment failed'),
-            default => parent::processWebhookEvent($transaction, $event, $object),
+            'CONFIRMED' => $this->markAsCompleted($transaction),
+
+            'REJECTED',
+            'REVERSED',
+            'CANCELED' => $this->markAsFailed(
+                $transaction,
+                $object['Message'] ?? 'Payment failed'
+            ),
+
+            default => $transaction,
         };
     }
 
@@ -73,10 +143,25 @@ class TinkoffGateway extends BaseAcquirerGateway implements PaymentGateway
     {
         $secretKey = $this->config['secret_key'] ?? '';
 
-        $data = $payload;
+        $data = array_filter(
+            $payload,
+            static fn ($value, $key) =>
+                $key !== 'Token'
+                && ! is_array($value)
+                && ! is_object($value),
+            ARRAY_FILTER_USE_BOTH
+        );
+
         $data['Password'] = $secretKey;
+
         ksort($data);
 
-        return hash('sha256', implode('', array_map(fn ($v) => (string) $v, $data)));
+        return hash(
+            'sha256',
+            implode('', array_map(
+                static fn ($value) => (string) $value,
+                $data
+            ))
+        );
     }
 }

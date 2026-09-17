@@ -36,8 +36,8 @@ class SberbankGateway extends BaseAcquirerGateway implements PaymentGateway
             'orderNumber' => (string) $order->id,
             'amount' => (int) ($order->total_amount * 100),
             'currency' => 643,
-            'returnUrl' => url('/payment/'.$order->id.'/callback'),
-            'failUrl' => url('/payment/'.$order->id.'/callback'),
+            'returnUrl' => route('api.v1.payments.callback', ['order' => $order->id]),
+            'failUrl' => route('api.v1.payments.callback', ['order' => $order->id]),
             'description' => 'Заказ №'.$order->id,
             'pageView' => 'MOBILE',
             'jsonParams' => json_encode([

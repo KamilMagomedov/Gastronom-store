@@ -29,8 +29,8 @@ class PsbGateway extends BaseAcquirerGateway implements PaymentGateway
             'amount' => (int) ($order->total_amount * 100),
             'currency' => 'RUB',
             'description' => 'Заказ №'.$order->id,
-            'returnUrl' => url('/payment/'.$order->id.'/callback'),
-            'failUrl' => url('/payment/'.$order->id.'/callback'),
+            'returnUrl' => route('api.v1.payments.callback', ['order' => $order->id]),
+            'failUrl' => route('api.v1.payments.callback', ['order' => $order->id]),
             'metadata' => [
                 'order_id' => (string) $order->id,
                 'customer_id' => (string) $order->customer_id,
