@@ -1,5 +1,16 @@
 import React from 'react';
-import { StyleSheet, View, Text, TouchableOpacity, TextInput, ScrollView, Platform, KeyboardAvoidingView, Alert } from 'react-native';
+import {
+  ActivityIndicator,
+  StyleSheet,
+  View,
+  Text,
+  TouchableOpacity,
+  TextInput,
+  ScrollView,
+  Platform,
+  KeyboardAvoidingView,
+  Alert,
+} from 'react-native';
 import { useRouter } from 'expo-router';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { IconSymbol } from '@/components/ui/icon-symbol';
@@ -8,8 +19,9 @@ import { Colors } from '@/constants/theme';
 import { useCart } from '@/context/cart-context';
 import MobileMap from '@/components/MobileMap';
 import DeliveryDateTimePicker from '@/components/DeliveryDateTimePicker';
-import {ApiService} from '@/services/api';
+import { ApiService } from '@/services/api';
 import { useAuth } from '@/context/auth-context';
+import { openBrowserAsync } from 'expo-web-browser';
 
 export default function CheckoutScreen() {
   const router = useRouter();
@@ -36,6 +48,7 @@ export default function CheckoutScreen() {
   const selectedPaymentMethod = settings?.payment_methods?.find(
     (method: any) => method.id === selectedPaymentMethodId,
   );
+  const [isSubmitting, setIsSubmitting] = React.useState(false);
 
   const isOnlinePayment = Boolean(selectedPaymentMethod?.acquirer);
   const mapUrl = `https://yandex.ru/map-widget/v1/?text=${encodeURIComponent(debouncedAddress)}&z=16`;
@@ -67,10 +80,7 @@ export default function CheckoutScreen() {
   }, [city, street]);
 
   React.useEffect(() => {
-    if (
-      settings?.payment_methods?.length &&
-      selectedPaymentMethodId === null
-    ) {
+    if (settings?.payment_methods?.length && selectedPaymentMethodId === null) {
       setSelectedPaymentMethodId(settings.payment_methods[0].id);
     }
   }, [settings, selectedPaymentMethodId]);
@@ -89,46 +99,49 @@ export default function CheckoutScreen() {
       window.alert(`${title}\n\n${message}`);
       return;
     }
-  
+
     Alert.alert(title, message);
   };
 
   const handlePay = async () => {
-    if (!user?.token) {
-      Alert.alert(
-        'Необходим вход',
-        'Войдите в аккаунт перед оформлением заказа.',
-      );
+    if (isSubmitting) {
       return;
     }
-  
+
+    if (!user?.token) {
+      Alert.alert('Необходим вход', 'Войдите в аккаунт перед оформлением заказа.');
+      return;
+    }
+
     if (!city.trim()) {
       Alert.alert('Ошибка', 'Введите город.');
       return;
     }
-  
+
     if (!street.trim()) {
       Alert.alert('Ошибка', 'Введите улицу и дом.');
       return;
     }
-  
+
     const cleanPhone = phone.replace(/\D/g, '');
-  
+
     if (cleanPhone.length < 10) {
       showAlert('Ошибка', 'Введите корректный номер телефона.');
       return;
     }
-  
+
     if (!settings?.delivery_methods?.length) {
       Alert.alert('Ошибка', 'Не удалось получить способы доставки.');
       return;
     }
-  
+
     if (!settings?.payment_methods?.length) {
       Alert.alert('Ошибка', 'Не удалось получить способы оплаты.');
       return;
     }
-  
+
+    setIsSubmitting(true);
+
     try {
       const formattedDate = deliveryDate.toLocaleDateString('ru-RU', {
         day: 'numeric',
@@ -137,10 +150,9 @@ export default function CheckoutScreen() {
       });
 
       const paymentMethod =
-        settings.payment_methods.find(
-          (method: any) => method.id === selectedPaymentMethodId,
-        ) ?? settings.payment_methods[0];
-  
+        settings.payment_methods.find((method: any) => method.id === selectedPaymentMethodId) ??
+        settings.payment_methods[0];
+
       const courierMethod =
         settings.delivery_methods.find((method: any) =>
           method.label?.toLowerCase().includes('курьер'),
@@ -155,85 +167,141 @@ export default function CheckoutScreen() {
       ]
         .filter(Boolean)
         .join(', ');
-  
+
       const response = await ApiService.createOrder(
         {
           delivery_method: courierMethod.id,
           payment_method: paymentMethod.id,
-  
+
           delivery_phone: `+${cleanPhone}`,
 
           delivery_address: fullDeliveryAddress,
-  
+
           delivery_city: city.trim(),
           delivery_street: street.trim(),
           delivery_apartment: apartment.trim() || undefined,
           delivery_entrance: entrance.trim() || undefined,
           delivery_floor: floor.trim() || undefined,
-  
+
           delivery_notes: comment.trim() || undefined,
-  
-          notes: [
-            `Дата доставки: ${formattedDate}`,
-            `Время доставки: ${deliveryTime}`,
-          ].join('\n'),
+
+          notes: [`Дата доставки: ${formattedDate}`, `Время доставки: ${deliveryTime}`].join('\n'),
         },
         user.token,
       );
-  
+
       const order = response.data;
-  
+
       await refresh();
-  
-      router.push({
-        pathname: '/order-success',
-        params: {
-          orderId: String(order.id),
-          totalPrice: String(order.total_amount),
-          deliveryDate: formattedDate,
-          deliveryTime,
-          address:
-            order.delivery_address ||
-            `${city.trim()}, ${street.trim()}`,
-        },
-      });
+
+      const orderSuccessParams = {
+        orderId: String(order.id),
+        totalPrice: String(order.total_amount),
+        deliveryDate: formattedDate,
+        deliveryTime,
+        address: order.delivery_address || `${city.trim()}, ${street.trim()}`,
+      };
+
+      if (!paymentMethod.acquirer) {
+        router.push({
+          pathname: '/order-success',
+          params: orderSuccessParams,
+        });
+
+        return;
+      }
+
+      try {
+        const paymentResponse = await ApiService.initiatePayment(order.id, user.token, 'bank_card');
+
+        const paymentUrl = paymentResponse.data.payment_url;
+
+        if (!paymentUrl) {
+          throw new Error('Payment URL was not returned.');
+        }
+
+        if (Platform.OS === 'web') {
+          window.open(paymentUrl, '_blank', 'noopener,noreferrer');
+
+          router.replace({
+            pathname: '/order/[id]',
+            params: {
+              id: String(order.id),
+            },
+          });
+
+          return;
+        }
+
+        await openBrowserAsync(paymentUrl);
+
+        const updatedOrderResponse = await ApiService.getOrder(order.id, user.token);
+
+        if (updatedOrderResponse.data.payment_status === 'paid') {
+          router.replace({
+            pathname: '/order-success',
+            params: orderSuccessParams,
+          });
+
+          return;
+        }
+
+        router.replace({
+          pathname: '/order/[id]',
+          params: {
+            id: String(order.id),
+          },
+        });
+      } catch (paymentError: any) {
+        console.error('Checkout: payment initiation error:', paymentError);
+
+        showAlert(
+          'Заказ создан',
+          `Заказ №${order.id} создан, но оплату пока не удалось запустить. Вы сможете повторить оплату в деталях заказа.`,
+        );
+
+        router.replace({
+          pathname: '/order/[id]',
+          params: {
+            id: String(order.id),
+          },
+        });
+      }
     } catch (error: any) {
       console.error('Checkout: create order error:', error);
-  
+
       const validationMessages = error?.errors
         ? Object.values(error.errors).flat().join('\n')
         : null;
-  
-      Alert.alert(
-        'Не удалось оформить заказ',
-        validationMessages ||
-          error?.message ||
-          'Произошла ошибка при создании заказа.',
-      );
 
       showAlert(
         'Не удалось оформить заказ',
-        validationMessages ||
-          error?.message ||
-          'Произошла ошибка при создании заказа.',
+        validationMessages || error?.message || 'Произошла ошибка при создании заказа.',
       );
+    } finally {
+      setIsSubmitting(false);
     }
   };
 
-  const selectedDeliveryMethod =
-  settings?.delivery_methods?.find((method: any) =>
+  const selectedDeliveryMethod = settings?.delivery_methods?.find((method: any) =>
     method.label?.toLowerCase().includes('курьер'),
   );
 
-  const deliveryPrice = selectedDeliveryMethod
-    ? Number(selectedDeliveryMethod.cost ?? 0)
-    : 0;
+  const deliveryPrice = selectedDeliveryMethod ? Number(selectedDeliveryMethod.cost ?? 0) : 0;
 
   const totalPrice = totalAmount + deliveryPrice;
 
   return (
-    <SafeAreaView style={[styles.container, { backgroundColor: colors.background }]} edges={['bottom']}>
-      <View style={[styles.header, { backgroundColor: colors.surface, borderBottomColor: colors.border }]}>
+    <SafeAreaView
+      style={[styles.container, { backgroundColor: colors.background }]}
+      edges={['bottom']}
+    >
+      <View
+        style={[
+          styles.header,
+          { backgroundColor: colors.surface, borderBottomColor: colors.border },
+        ]}
+      >
         <TouchableOpacity onPress={() => router.back()} style={styles.headerButton}>
           <IconSymbol name="chevron.left" size={24} color={colors.text} />
         </TouchableOpacity>
@@ -243,11 +311,14 @@ export default function CheckoutScreen() {
         </TouchableOpacity>
       </View>
 
-      <KeyboardAvoidingView 
+      <KeyboardAvoidingView
         behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
         style={{ flex: 1 }}
       >
-        <ScrollView contentContainerStyle={styles.scrollContent} showsVerticalScrollIndicator={false}>
+        <ScrollView
+          contentContainerStyle={styles.scrollContent}
+          showsVerticalScrollIndicator={false}
+        >
           <View style={styles.section}>
             <View style={styles.sectionHeader}>
               <Text style={[styles.sectionTitle, { color: colors.text }]}>Куда везем?</Text>
@@ -265,18 +336,37 @@ export default function CheckoutScreen() {
                 <MobileMap apiKey="d09d333a-47cc-46e9-9f40-ca543b5ff126" />
               )
             ) : (
-              <View style={[styles.mapPreview, { backgroundColor: colors.surface, borderRadius: 16, marginBottom: 16, height: 150, justifyContent: 'center', alignItems: 'center' }]}>
+              <View
+                style={[
+                  styles.mapPreview,
+                  {
+                    backgroundColor: colors.surface,
+                    borderRadius: 16,
+                    marginBottom: 16,
+                    height: 150,
+                    justifyContent: 'center',
+                    alignItems: 'center',
+                  },
+                ]}
+              >
                 <Text style={{ color: colors.textSub, fontSize: 14 }}>
                   Введите адрес для отображения карты
                 </Text>
               </View>
             )}
-            
+
             <View style={styles.inputGroup}>
               <View style={styles.inputWrapper}>
                 <Text style={[styles.inputLabel, { color: colors.textSub }]}>Город</Text>
-                <TextInput 
-                  style={[styles.input, { backgroundColor: colors.surface, color: colors.text, borderColor: colors.border }]}
+                <TextInput
+                  style={[
+                    styles.input,
+                    {
+                      backgroundColor: colors.surface,
+                      color: colors.text,
+                      borderColor: colors.border,
+                    },
+                  ]}
                   value={city}
                   onChangeText={setCity}
                   placeholder="Введите город"
@@ -285,8 +375,15 @@ export default function CheckoutScreen() {
               </View>
               <View style={styles.inputWrapper}>
                 <Text style={[styles.inputLabel, { color: colors.textSub }]}>Улица, дом</Text>
-                <TextInput 
-                  style={[styles.input, { backgroundColor: colors.surface, color: colors.text, borderColor: colors.border }]}
+                <TextInput
+                  style={[
+                    styles.input,
+                    {
+                      backgroundColor: colors.surface,
+                      color: colors.text,
+                      borderColor: colors.border,
+                    },
+                  ]}
                   value={street}
                   onChangeText={setStreet}
                   placeholder="Улица, дом, корпус"
@@ -296,24 +393,45 @@ export default function CheckoutScreen() {
               <View style={styles.rowInputs}>
                 <View style={[styles.inputWrapper, { flex: 1 }]}>
                   <Text style={[styles.inputLabel, { color: colors.textSub }]}>Кв./Офис</Text>
-                  <TextInput 
-                    style={[styles.input, { backgroundColor: colors.surface, color: colors.text, borderColor: colors.border }]}
+                  <TextInput
+                    style={[
+                      styles.input,
+                      {
+                        backgroundColor: colors.surface,
+                        color: colors.text,
+                        borderColor: colors.border,
+                      },
+                    ]}
                     value={apartment}
                     onChangeText={setApartment}
                   />
                 </View>
                 <View style={[styles.inputWrapper, { flex: 1 }]}>
                   <Text style={[styles.inputLabel, { color: colors.textSub }]}>Подъезд</Text>
-                  <TextInput 
-                    style={[styles.input, { backgroundColor: colors.surface, color: colors.text, borderColor: colors.border }]}
+                  <TextInput
+                    style={[
+                      styles.input,
+                      {
+                        backgroundColor: colors.surface,
+                        color: colors.text,
+                        borderColor: colors.border,
+                      },
+                    ]}
                     value={entrance}
                     onChangeText={setEntrance}
                   />
                 </View>
                 <View style={[styles.inputWrapper, { flex: 1 }]}>
                   <Text style={[styles.inputLabel, { color: colors.textSub }]}>Этаж</Text>
-                  <TextInput 
-                    style={[styles.input, { backgroundColor: colors.surface, color: colors.text, borderColor: colors.border }]}
+                  <TextInput
+                    style={[
+                      styles.input,
+                      {
+                        backgroundColor: colors.surface,
+                        color: colors.text,
+                        borderColor: colors.border,
+                      },
+                    ]}
                     value={floor}
                     onChangeText={setFloor}
                   />
@@ -357,7 +475,9 @@ export default function CheckoutScreen() {
           />
 
           <View style={styles.section}>
-            <Text style={[styles.sectionTitle, { color: colors.text, marginBottom: 16 }]}>Оплата</Text>
+            <Text style={[styles.sectionTitle, { color: colors.text, marginBottom: 16 }]}>
+              Оплата
+            </Text>
             <View style={styles.paymentOptions}>
               {settings?.payment_methods?.map((method: any) => {
                 const selected = selectedPaymentMethodId === method.id;
@@ -380,12 +500,7 @@ export default function CheckoutScreen() {
                     ]}
                   >
                     <View style={styles.paymentInfo}>
-                      <View
-                        style={[
-                          styles.paymentIcon,
-                          { backgroundColor: colors.background },
-                        ]}
-                      >
+                      <View style={[styles.paymentIcon, { backgroundColor: colors.background }]}>
                         <IconSymbol
                           name={isOnline ? 'creditcard' : 'banknote'}
                           size={20}
@@ -399,9 +514,7 @@ export default function CheckoutScreen() {
                         </Text>
 
                         {!!method.description && (
-                          <Text
-                            style={[styles.paymentSub, { color: colors.textSub }]}
-                          >
+                          <Text style={[styles.paymentSub, { color: colors.textSub }]}>
                             {method.description}
                           </Text>
                         )}
@@ -409,19 +522,9 @@ export default function CheckoutScreen() {
                     </View>
 
                     {selected ? (
-                      <View
-                        style={[
-                          styles.radioSelected,
-                          { backgroundColor: colors.primary },
-                        ]}
-                      />
+                      <View style={[styles.radioSelected, { backgroundColor: colors.primary }]} />
                     ) : (
-                      <View
-                        style={[
-                          styles.radioUnselected,
-                          { borderColor: colors.border },
-                        ]}
-                      />
+                      <View style={[styles.radioUnselected, { borderColor: colors.border }]} />
                     )}
                   </TouchableOpacity>
                 );
@@ -430,9 +533,14 @@ export default function CheckoutScreen() {
           </View>
 
           <View style={styles.section}>
-            <Text style={[styles.inputLabel, { color: colors.textSub, marginBottom: 8 }]}>Комментарий курьеру</Text>
-            <TextInput 
-              style={[styles.textArea, { backgroundColor: colors.surface, color: colors.text, borderColor: colors.border }]}
+            <Text style={[styles.inputLabel, { color: colors.textSub, marginBottom: 8 }]}>
+              Комментарий курьеру
+            </Text>
+            <TextInput
+              style={[
+                styles.textArea,
+                { backgroundColor: colors.surface, color: colors.text, borderColor: colors.border },
+              ]}
               placeholder="Код домофона, оставить у двери..."
               placeholderTextColor={colors.textSub}
               multiline
@@ -444,40 +552,59 @@ export default function CheckoutScreen() {
 
           <View style={[styles.summary, { borderTopColor: colors.border }]}>
             <View style={styles.summaryRow}>
-              <Text style={[styles.summaryText, { color: colors.textSub }]}>Товары ({totalItemsCount})</Text>
-              <Text style={[styles.summaryValue, { color: colors.text }]}>{totalAmount.toFixed(0)} ₽</Text>
+              <Text style={[styles.summaryText, { color: colors.textSub }]}>
+                Товары ({totalItemsCount})
+              </Text>
+              <Text style={[styles.summaryValue, { color: colors.text }]}>
+                {totalAmount.toFixed(0)} ₽
+              </Text>
             </View>
-            
+
             <View style={styles.summaryRow}>
               <Text style={[styles.summaryText, { color: colors.textSub }]}>Доставка</Text>
-              <Text style={[styles.summaryValue, { color: deliveryPrice === 0 ? colors.primaryDark : colors.text }]}>
+              <Text
+                style={[
+                  styles.summaryValue,
+                  { color: deliveryPrice === 0 ? colors.primaryDark : colors.text },
+                ]}
+              >
                 {deliveryPrice === 0 ? 'Бесплатно' : `${deliveryPrice} ₽`}
               </Text>
             </View>
-            
+
             <View style={styles.summaryRow}>
               <Text style={[styles.summaryText, { color: colors.textSub }]}>Скидка</Text>
               <Text style={[styles.summaryValue, { color: colors.primaryDark }]}>-0 ₽</Text>
             </View>
-            
+
             <View style={[styles.summaryRow, { marginTop: 8 }]}>
               <Text style={[styles.totalText, { color: colors.text }]}>Итого</Text>
-              <Text style={[styles.totalValue, { color: colors.text }]}>{totalPrice.toFixed(0)} ₽</Text>
+              <Text style={[styles.totalValue, { color: colors.text }]}>
+                {totalPrice.toFixed(0)} ₽
+              </Text>
             </View>
           </View>
         </ScrollView>
       </KeyboardAvoidingView>
 
       <TouchableOpacity
-        style={[styles.payButton, { backgroundColor: colors.primary }]}
-        onPress={() => {
-          handlePay();
-        }}
+        style={[
+          styles.payButton,
+          {
+            backgroundColor: colors.primary,
+            opacity: isSubmitting ? 0.6 : 1,
+          },
+        ]}
+        onPress={handlePay}
+        disabled={isSubmitting}
       >
-        <Text style={styles.payButtonText}>
-          {isOnlinePayment ? 'Оплатить' : 'Оформить заказ'}{' '}
-          {totalPrice.toFixed(0)} ₽
-        </Text>
+        {isSubmitting ? (
+          <ActivityIndicator size="small" color="#102216" />
+        ) : (
+          <Text style={styles.payButtonText}>
+            {isOnlinePayment ? 'Оплатить' : 'Оформить заказ'} {totalPrice.toFixed(0)} ₽
+          </Text>
+        )}
       </TouchableOpacity>
     </SafeAreaView>
   );
@@ -495,8 +622,8 @@ const styles = StyleSheet.create({
     paddingVertical: 12,
     borderBottomWidth: 1,
     ...Platform.select({
-        ios: { paddingTop: 0 },
-        android: { paddingTop: 40 },
+      ios: { paddingTop: 0 },
+      android: { paddingTop: 40 },
     }),
   },
   headerButton: {
