@@ -13,6 +13,10 @@ class PaymentMethodResource extends JsonResource
             'id' => $this->id,
             'label' => $this->name,
             'description' => $this->description,
+
+            'is_online' => $this->acquirer_id !== null || $this->gateway !== null,
+            'acquirer_code' => $this->acquirer_code,
+            'payment_method_type' => $this->payment_method_type,
         ];
     }
 }
