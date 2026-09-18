@@ -52,6 +52,16 @@ class PaymentController extends Controller
             ]);
 
             return ApiResponse::laravelError($e->getMessage(), statusCode: 422);
+        } catch (\Throwable $e) {
+            Log::error('Payment provider request failed', [
+                'order_id' => $order->id,
+                'error' => $e->getMessage(),
+            ]);
+
+            return ApiResponse::laravelError(
+                'Payment service is temporarily unavailable',
+                statusCode: 502
+            );
         }
     }
 

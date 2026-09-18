@@ -27,9 +27,13 @@ class AcquirerSeeder extends Seeder
             'code' => 'tinkoff',
             'description' => 'Эквайринг Тинькофф — оплата картами и Tinkoff Pay',
             'config' => [
+                'api_url' => env(
+                    'TINKOFF_API_URL',
+                    'https://securepay.tinkoff.ru/v2'
+                ),
                 'terminal_key' => env('TINKOFF_TERMINAL_KEY'),
                 'secret_key' => env('TINKOFF_SECRET_KEY'),
-                'terminal_password' => env('TINKOFF_TERMINAL_PASSWORD'),
+                'api_token' => env('TINKOFF_API_TOKEN'),
             ],
             'is_active' => true,
             'sort_order' => 2,

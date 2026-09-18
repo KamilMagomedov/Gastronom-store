@@ -69,7 +69,7 @@ abstract class BaseAcquirerGateway implements PaymentGateway
         return [
             'payment_url' => $result['payment_url'] ?? null,
             'transaction_id' => $transaction->id,
-            'gateway_transaction_id' => $data['id'] ?? null,
+            'gateway_transaction_id' => $result['gateway_transaction_id'] ?? $data['id'] ?? null,
             'payment_method_type' => $result['payment_method_type'] ?? 'bank_card',
         ];
     }

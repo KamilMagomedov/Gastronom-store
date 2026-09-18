@@ -12,6 +12,21 @@ class TinkoffGateway extends BaseAcquirerGateway implements PaymentGateway
 
     protected string $apiUrl = 'https://securepay.tinkoff.ru/v2';
 
+    public function __construct(array $config = [])
+    {
+        parent::__construct($config);
+
+        if (! empty($config['api_url'])) {
+            $this->apiUrl = rtrim($config['api_url'], '/');
+        }
+    }
+
+    public function isAvailable(): bool
+    {
+        return ! empty($this->config['terminal_key'])
+            && ! empty($this->config['secret_key']);
+    }
+
     public function getGatewayName(): string
     {
         return $this->gatewayName;
@@ -134,8 +149,8 @@ class TinkoffGateway extends BaseAcquirerGateway implements PaymentGateway
 
     protected function authenticateRequest($http): void
     {
-        if (! empty($this->config['terminal_password'])) {
-            $http->withHeader('Authorization', 'Bearer '.$this->config['terminal_password']);
+        if (! empty($this->config['api_token'])) {
+            $http->withToken($this->config['api_token']);
         }
     }
 
