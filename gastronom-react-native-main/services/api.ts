@@ -306,8 +306,6 @@ async function request<T>(path: string, options: RequestInit = {}): Promise<T> {
   const timeoutId = setTimeout(() => controller.abort(), 15000); // 15 second timeout
 
   try {
-    console.log(`API: ${options.method || 'GET'} ${API_BASE_URL}${path}`);
-
     const response = await fetch(`${API_BASE_URL}${path}`, {
       ...options,
       signal: controller.signal,
@@ -319,7 +317,6 @@ async function request<T>(path: string, options: RequestInit = {}): Promise<T> {
     });
 
     clearTimeout(timeoutId);
-    console.log(`API: Response status: ${response.status} for ${path}`);
 
     const data = await response.json();
 

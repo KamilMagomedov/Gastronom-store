@@ -92,13 +92,11 @@ export default function HomeScreen() {
     setRefreshing(false);
   }, [fetchAll]);
 
-  // Filter popular products by selected category
   const filteredPopular =
     selectedCategoryId === null
       ? popularProducts
       : popularProducts.filter((p) => p.category.id === selectedCategoryId);
 
-  console.log('frequentProducts: ', frequentProducts);
   return (
     <ThemedView style={[styles.container, { backgroundColor: colors.background }]}>
       <HomeHeader />
@@ -118,7 +116,6 @@ export default function HomeScreen() {
           <SearchHistory />
         </View>
 
-        {/* Часто покупаемые */}
         <Section title="Часто покупаемые">
           {loadingFrequent ? (
             <ActivityIndicator color={colors.primary} style={styles.loader} />
@@ -133,7 +130,6 @@ export default function HomeScreen() {
           )}
         </Section>
 
-        {/* Категории */}
         <Section title="Категории" hideAll>
           <CategoryList
             categories={categories}
@@ -143,7 +139,6 @@ export default function HomeScreen() {
           />
         </Section>
 
-        {/* Популярные предложения */}
         <Section title="Популярные предложения">
           {loadingPopular ? (
             <ActivityIndicator color={colors.primary} style={styles.loader} />
