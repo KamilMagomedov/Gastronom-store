@@ -158,10 +158,17 @@ export interface DeliveryMethod {
   cost: number;
 }
 
+export interface PaymentAcquirer {
+  id: number;
+  name: string;
+  code: string;
+}
+
 export interface PaymentMethod {
   id: number;
   name: string;
   description: string;
+  acquirer: PaymentAcquirer | null;
 }
 
 export interface OrderStatus {
@@ -219,6 +226,15 @@ export interface CreateOrderData {
   delivery_floor?: string;
 
   notes?: string;
+}
+
+export interface InitiatePaymentResponse {
+  data: {
+    payment_url: string | null;
+    transaction_id: number;
+    payment_method_type: 'bank_card' | 'sbp';
+  };
+  success: boolean;
 }
 
 export interface ApiOrderSummary {
@@ -694,6 +710,22 @@ export class ApiService {
       method: 'POST',
       body: JSON.stringify(orderData),
       headers: token ? { Authorization: `Bearer ${token}` } : {},
+    });
+  }
+
+  static async initiatePayment(
+    orderId: number | string,
+    token: string,
+    paymentMethodType: 'bank_card' | 'sbp' = 'bank_card',
+  ): Promise<InitiatePaymentResponse> {
+    return request<InitiatePaymentResponse>(`/v1/payments/${orderId}/initiate`, {
+      method: 'POST',
+      body: JSON.stringify({
+        payment_method_type: paymentMethodType,
+      }),
+      headers: {
+        Authorization: `Bearer ${token}`,
+      },
     });
   }
 
