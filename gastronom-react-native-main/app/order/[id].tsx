@@ -3,18 +3,16 @@ import { useFocusEffect } from '@react-navigation/native';
 
 import {
   ActivityIndicator,
+  Alert,
   Image,
+  Platform,
   ScrollView,
   StyleSheet,
   TouchableOpacity,
   View,
 } from 'react-native';
 
-import {
-  Stack,
-  useLocalSearchParams,
-  useRouter,
-} from 'expo-router';
+import { Stack, useLocalSearchParams, useRouter } from 'expo-router';
 
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
@@ -26,10 +24,8 @@ import { Colors } from '@/constants/theme';
 import { useColorScheme } from '@/hooks/use-color-scheme';
 import { useAuth } from '@/context/auth-context';
 
-import {
-  ApiOrder,
-  ApiService,
-} from '@/services/api';
+import { ApiOrder, ApiService } from '@/services/api';
+import { openBrowserAsync } from 'expo-web-browser';
 
 const STATUS_CONFIG: Record<
   string,
@@ -128,24 +124,88 @@ export default function OrderDetailScreen() {
   const colorScheme = useColorScheme() ?? 'light';
   const colors = Colors[colorScheme];
 
-  const {
-    user,
-    isLoading: authLoading,
-  } = useAuth();
+  const { user, isLoading: authLoading } = useAuth();
 
-  const [order, setOrder] =
-    useState<ApiOrder | null>(null);
+  const [order, setOrder] = useState<ApiOrder | null>(null);
 
   const [loading, setLoading] = useState(true);
+  const [isPaying, setIsPaying] = useState(false);
 
-  const [error, setError] =
-    useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null);
 
   const handleBack = () => {
     if (router.canGoBack()) {
       router.back();
     } else {
       router.replace('/orders');
+    }
+  };
+
+  const showAlert = (title: string, message: string) => {
+    if (Platform.OS === 'web') {
+      window.alert(`${title}\n\n${message}`);
+      return;
+    }
+
+    Alert.alert(title, message);
+  };
+
+  const handlePayOrder = async () => {
+    if (isPaying || !user?.token || !order) {
+      return;
+    }
+
+    const paymentMethodType = order.payment_method?.payment_method_type;
+
+    if (paymentMethodType !== 'bank_card' && paymentMethodType !== 'sbp') {
+      showAlert('Ошибка оплаты', 'Для этого заказа не удалось определить способ онлайн-оплаты.');
+      return;
+    }
+
+    setIsPaying(true);
+
+    try {
+      const paymentResponse = await ApiService.initiatePayment(
+        order.id,
+        user.token,
+        paymentMethodType,
+      );
+
+      const paymentUrl = paymentResponse.data.payment_url;
+
+      if (!paymentUrl) {
+        throw new Error('Payment URL was not returned.');
+      }
+
+      if (Platform.OS === 'web') {
+        window.open(paymentUrl, '_blank', 'noopener,noreferrer');
+
+        showAlert(
+          'Оплата открыта',
+          'Страница оплаты открыта в новой вкладке. После оплаты вернитесь к заказу.',
+        );
+
+        return;
+      }
+
+      await openBrowserAsync(paymentUrl);
+
+      const updatedOrderResponse = await ApiService.getOrder(order.id, user.token);
+
+      setOrder(updatedOrderResponse.data);
+
+      if (updatedOrderResponse.data.payment_status === 'paid') {
+        showAlert('Оплата прошла', `Заказ №${order.id} успешно оплачен.`);
+      }
+    } catch (paymentError: any) {
+      console.error('Order details: payment initiation failed', paymentError);
+
+      showAlert(
+        'Не удалось запустить оплату',
+        paymentError?.message || 'Попробуйте повторить оплату позже.',
+      );
+    } finally {
+      setIsPaying(false);
     }
   };
 
@@ -168,24 +228,16 @@ export default function OrderDetailScreen() {
         setError(null);
 
         try {
-          const response = await ApiService.getOrder(
-            orderId,
-            user.token,
-          );
+          const response = await ApiService.getOrder(orderId, user.token);
 
           if (mounted) {
             setOrder(response.data);
           }
         } catch (loadError) {
-          console.error(
-            'Order details: failed to load order',
-            loadError,
-          );
+          console.error('Order details: failed to load order', loadError);
 
           if (mounted) {
-            setError(
-              'Не удалось загрузить данные заказа.',
-            );
+            setError('Не удалось загрузить данные заказа.');
           }
         } finally {
           if (mounted) {
@@ -199,11 +251,7 @@ export default function OrderDetailScreen() {
       return () => {
         mounted = false;
       };
-    }, [
-      authLoading,
-      orderId,
-      user?.token,
-    ]),
+    }, [authLoading, orderId, user?.token]),
   );
 
   if (loading) {
@@ -219,10 +267,7 @@ export default function OrderDetailScreen() {
           },
         ]}
       >
-        <ActivityIndicator
-          size="large"
-          color={colors.primaryDark}
-        />
+        <ActivityIndicator size="large" color={colors.primaryDark} />
 
         <ThemedText
           style={{
@@ -255,20 +300,11 @@ export default function OrderDetailScreen() {
             },
           ]}
         >
-          <TouchableOpacity
-            style={styles.backButton}
-            onPress={handleBack}
-          >
-            <IconSymbol
-              name="chevron.left"
-              size={24}
-              color={colors.text}
-            />
+          <TouchableOpacity style={styles.backButton} onPress={handleBack}>
+            <IconSymbol name="chevron.left" size={24} color={colors.text} />
           </TouchableOpacity>
 
-          <ThemedText style={styles.headerTitle}>
-            Детали заказа
-          </ThemedText>
+          <ThemedText style={styles.headerTitle}>Детали заказа</ThemedText>
 
           <View style={{ width: 40 }} />
         </View>
@@ -294,51 +330,34 @@ export default function OrderDetailScreen() {
     );
   }
 
-  const status =
-    STATUS_CONFIG[order.status] ?? {
-      label: order.status,
-      color: '#6b7280',
-      backgroundColor:
-        'rgba(107, 114, 128, 0.12)',
-    };
+  const status = STATUS_CONFIG[order.status] ?? {
+    label: order.status,
+    color: '#6b7280',
+    backgroundColor: 'rgba(107, 114, 128, 0.12)',
+  };
 
   const products = order.products ?? [];
 
-  const totalItemsCount = products.reduce(
-    (sum, product) => sum + (product.quantity || 1),
-    0,
-  );
+  const totalItemsCount = products.reduce((sum, product) => sum + (product.quantity || 1), 0);
 
   const total = Number(order.total_amount ?? 0);
 
-  const deliveryCost = Number(
-    order.delivery_cost ??
-      order.shipping_amount ??
-      0,
-  );
+  const deliveryCost = Number(order.delivery_cost ?? order.shipping_amount ?? 0);
 
-  const productsSubtotal =
-    Math.max(0, total - deliveryCost);
+  const productsSubtotal = Math.max(0, total - deliveryCost);
 
-  const canCancel = [
-    'pending',
-    'confirmed',
-    'preparing',
-  ].includes(order.status);
+  const canCancel = ['pending', 'confirmed', 'preparing'].includes(order.status);
 
-  const canRepeat = [
-    'completed',
-    'cancelled',
-    'refunded',
-  ].includes(order.status);
+  const canRepeat = ['completed', 'cancelled', 'refunded'].includes(order.status);
 
-  const currentStepIndex = ORDER_TRACKING_STEPS.findIndex(
-    (step) => step === order.status,
-  );
+  const canPay =
+    order.payment_method?.is_online === true &&
+    ['pending', 'failed'].includes(order.payment_status) &&
+    !['cancelled', 'refunded'].includes(order.status);
 
-  const isInterrupted =
-    order.status === 'cancelled' ||
-    order.status === 'refunded';
+  const currentStepIndex = ORDER_TRACKING_STEPS.findIndex((step) => step === order.status);
+
+  const isInterrupted = order.status === 'cancelled' || order.status === 'refunded';
 
   return (
     <ThemedView
@@ -350,9 +369,7 @@ export default function OrderDetailScreen() {
         },
       ]}
     >
-      <Stack.Screen
-        options={{ headerShown: false }}
-      />
+      <Stack.Screen options={{ headerShown: false }} />
 
       <View
         style={[
@@ -363,20 +380,11 @@ export default function OrderDetailScreen() {
           },
         ]}
       >
-        <TouchableOpacity
-          style={styles.backButton}
-          onPress={handleBack}
-        >
-          <IconSymbol
-            name="chevron.left"
-            size={24}
-            color={colors.text}
-          />
+        <TouchableOpacity style={styles.backButton} onPress={handleBack}>
+          <IconSymbol name="chevron.left" size={24} color={colors.text} />
         </TouchableOpacity>
 
-        <ThemedText style={styles.headerTitle}>
-          Детали заказа
-        </ThemedText>
+        <ThemedText style={styles.headerTitle}>Детали заказа</ThemedText>
 
         <View style={{ width: 40 }} />
       </View>
@@ -385,37 +393,25 @@ export default function OrderDetailScreen() {
         contentContainerStyle={[
           styles.scrollContent,
           {
-            paddingBottom: Math.max(
-              insets.bottom,
-              20,
-            ),
+            paddingBottom: Math.max(insets.bottom, 20),
           },
         ]}
         showsVerticalScrollIndicator={false}
       >
         <View style={styles.content}>
           <View style={styles.titleSection}>
-            <ThemedText
-              style={styles.orderNumber}
-            >
-              Заказ #{order.id}
-            </ThemedText>
+            <ThemedText style={styles.orderNumber}>Заказ #{order.id}</ThemedText>
 
             <View style={styles.statusRow}>
               <View
                 style={[
                   styles.statusBadge,
                   {
-                    backgroundColor:
-                      status.backgroundColor,
+                    backgroundColor: status.backgroundColor,
                   },
                 ]}
               >
-                <IconSymbol
-                  name="info.circle.fill"
-                  size={14}
-                  color={status.color}
-                />
+                <IconSymbol name="info.circle.fill" size={14} color={status.color} />
 
                 <ThemedText
                   style={[
@@ -443,9 +439,7 @@ export default function OrderDetailScreen() {
           </View>
 
           <View style={styles.section}>
-            <ThemedText style={styles.sectionTitle}>
-              Статус заказа
-            </ThemedText>
+            <ThemedText style={styles.sectionTitle}>Статус заказа</ThemedText>
 
             {isInterrupted ? (
               <View
@@ -457,21 +451,11 @@ export default function OrderDetailScreen() {
                   },
                 ]}
               >
-                <ThemedText
-                  style={[
-                    styles.interruptedTitle,
-                    { color: status.color },
-                  ]}
-                >
+                <ThemedText style={[styles.interruptedTitle, { color: status.color }]}>
                   {status.label}
                 </ThemedText>
 
-                <ThemedText
-                  style={[
-                    styles.interruptedText,
-                    { color: colors.textSub },
-                  ]}
-                >
+                <ThemedText style={[styles.interruptedText, { color: colors.textSub }]}>
                   {order.status === 'cancelled'
                     ? 'Заказ отменён и больше не находится в доставке.'
                     : 'Для заказа оформлен возврат.'}
@@ -493,53 +477,38 @@ export default function OrderDetailScreen() {
                   const isReached = isCompleted || isCurrent;
 
                   return (
-                    <View
-                      key={step}
-                      style={styles.trackingStep}
-                    >
+                    <View key={step} style={styles.trackingStep}>
                       <View style={styles.trackingIndicator}>
                         <View
                           style={[
                             styles.trackingDot,
                             {
-                              borderColor: isReached
-                                ? colors.primary
-                                : colors.border,
-                              backgroundColor: isCompleted
-                                ? colors.primary
-                                : colors.surface,
+                              borderColor: isReached ? colors.primary : colors.border,
+                              backgroundColor: isCompleted ? colors.primary : colors.surface,
                             },
                           ]}
                         >
                           {isCompleted ? (
-                            <ThemedText
-                              style={styles.trackingCheck}
-                            >
-                              ✓
-                            </ThemedText>
+                            <ThemedText style={styles.trackingCheck}>✓</ThemedText>
                           ) : isCurrent ? (
                             <View
                               style={[
                                 styles.trackingInnerDot,
                                 {
-                                  backgroundColor:
-                                    colors.primary,
+                                  backgroundColor: colors.primary,
                                 },
                               ]}
                             />
                           ) : null}
                         </View>
 
-                        {index <
-                          ORDER_TRACKING_STEPS.length - 1 && (
+                        {index < ORDER_TRACKING_STEPS.length - 1 && (
                           <View
                             style={[
                               styles.trackingLine,
                               {
                                 backgroundColor:
-                                  index < currentStepIndex
-                                    ? colors.primary
-                                    : colors.border,
+                                  index < currentStepIndex ? colors.primary : colors.border,
                               },
                             ]}
                           />
@@ -551,9 +520,7 @@ export default function OrderDetailScreen() {
                           style={[
                             styles.trackingLabel,
                             {
-                              color: isReached
-                                ? colors.text
-                                : colors.textSub,
+                              color: isReached ? colors.text : colors.textSub,
                             },
                           ]}
                         >
@@ -581,11 +548,7 @@ export default function OrderDetailScreen() {
           </View>
 
           <View style={styles.section}>
-            <ThemedText
-              style={styles.sectionTitle}
-            >
-              Товары ({totalItemsCount})
-            </ThemedText>
+            <ThemedText style={styles.sectionTitle}>Товары ({totalItemsCount})</ThemedText>
 
             <View style={styles.itemsList}>
               {products.map((product) => (
@@ -594,10 +557,8 @@ export default function OrderDetailScreen() {
                   style={[
                     styles.itemCard,
                     {
-                      backgroundColor:
-                        colors.surface,
-                      borderColor:
-                        colors.border,
+                      backgroundColor: colors.surface,
+                      borderColor: colors.border,
                     },
                   ]}
                 >
@@ -614,24 +575,16 @@ export default function OrderDetailScreen() {
                         styles.itemImage,
                         {
                           alignItems: 'center',
-                          justifyContent:
-                            'center',
+                          justifyContent: 'center',
                         },
                       ]}
                     >
-                      <IconSymbol
-                        name="bag.fill"
-                        size={24}
-                        color={colors.textSub}
-                      />
+                      <IconSymbol name="bag.fill" size={24} color={colors.textSub} />
                     </View>
                   )}
 
                   <View style={styles.itemInfo}>
-                    <ThemedText
-                      style={styles.itemName}
-                      numberOfLines={1}
-                    >
+                    <ThemedText style={styles.itemName} numberOfLines={1}>
                       {product.name}
                     </ThemedText>
 
@@ -648,9 +601,7 @@ export default function OrderDetailScreen() {
                     </ThemedText>
                   </View>
 
-                  <ThemedText
-                    style={styles.itemPrice}
-                  >
+                  <ThemedText style={styles.itemPrice}>
                     {formatPrice(product.total_price)}
                   </ThemedText>
                 </View>
@@ -659,18 +610,13 @@ export default function OrderDetailScreen() {
           </View>
 
           <View style={styles.section}>
-            <ThemedText
-              style={styles.sectionTitle}
-            >
-              Информация о доставке
-            </ThemedText>
+            <ThemedText style={styles.sectionTitle}>Информация о доставке</ThemedText>
 
             <View
               style={[
                 styles.deliveryCard,
                 {
-                  backgroundColor:
-                    colors.surface,
+                  backgroundColor: colors.surface,
                   borderColor: colors.border,
                 },
               ]}
@@ -680,40 +626,27 @@ export default function OrderDetailScreen() {
                   style={[
                     styles.deliveryIcon,
                     {
-                      backgroundColor:
-                        'rgba(19, 236, 91, 0.15)',
+                      backgroundColor: 'rgba(19, 236, 91, 0.15)',
                     },
                   ]}
                 >
-                  <IconSymbol
-                    name="house.fill"
-                    size={20}
-                    color="#059669"
-                  />
+                  <IconSymbol name="house.fill" size={20} color="#059669" />
                 </View>
 
-                <View
-                  style={styles.deliveryInfo}
-                >
+                <View style={styles.deliveryInfo}>
                   <ThemedText
                     style={[
                       styles.deliveryLabel,
                       {
-                        color:
-                          colors.textSub,
+                        color: colors.textSub,
                       },
                     ]}
                   >
                     АДРЕС ДОСТАВКИ
                   </ThemedText>
 
-                  <ThemedText
-                    style={
-                      styles.deliveryValue
-                    }
-                  >
-                    {order.delivery_address ||
-                      'Адрес не указан'}
+                  <ThemedText style={styles.deliveryValue}>
+                    {order.delivery_address || 'Адрес не указан'}
                   </ThemedText>
                 </View>
               </View>
@@ -722,8 +655,7 @@ export default function OrderDetailScreen() {
                 style={[
                   styles.divider,
                   {
-                    backgroundColor:
-                      colors.border,
+                    backgroundColor: colors.border,
                     marginVertical: 16,
                   },
                 ]}
@@ -734,43 +666,29 @@ export default function OrderDetailScreen() {
                   style={[
                     styles.deliveryIcon,
                     {
-                      backgroundColor:
-                        'rgba(19, 236, 91, 0.15)',
+                      backgroundColor: 'rgba(19, 236, 91, 0.15)',
                     },
                   ]}
                 >
-                  <IconSymbol
-                    name="bag.fill"
-                    size={20}
-                    color="#059669"
-                  />
+                  <IconSymbol name="bag.fill" size={20} color="#059669" />
                 </View>
 
-                <View
-                  style={styles.deliveryInfo}
-                >
+                <View style={styles.deliveryInfo}>
                   <View style={styles.rowBetween}>
                     <View style={{ flex: 1 }}>
                       <ThemedText
                         style={[
                           styles.deliveryLabel,
                           {
-                            color:
-                              colors.textSub,
+                            color: colors.textSub,
                           },
                         ]}
                       >
                         СПОСОБ
                       </ThemedText>
 
-                      <ThemedText
-                        style={
-                          styles.deliveryValue
-                        }
-                      >
-                        {order.delivery_method
-                          ?.label ||
-                          'Не указан'}
+                      <ThemedText style={styles.deliveryValue}>
+                        {order.delivery_method?.label || 'Не указан'}
                       </ThemedText>
                     </View>
 
@@ -778,71 +696,58 @@ export default function OrderDetailScreen() {
                       style={[
                         styles.freeBadge,
                         {
-                          backgroundColor:
-                            'rgba(19, 236, 91, 0.15)',
+                          backgroundColor: 'rgba(19, 236, 91, 0.15)',
                         },
                       ]}
                     >
-                      <ThemedText
-                        style={styles.freeText}
-                      >
-                        {deliveryCost === 0
-                          ? 'Бесплатно'
-                          : formatPrice(
-                              deliveryCost,
-                            )}
+                      <ThemedText style={styles.freeText}>
+                        {deliveryCost === 0 ? 'Бесплатно' : formatPrice(deliveryCost)}
                       </ThemedText>
                     </View>
                   </View>
                 </View>
               </View>
               {order.delivery_notes?.trim() ? (
-                  <>
+                <>
+                  <View
+                    style={[
+                      styles.divider,
+                      {
+                        backgroundColor: colors.border,
+                        marginVertical: 16,
+                      },
+                    ]}
+                  />
+
+                  <View style={styles.deliveryRow}>
                     <View
                       style={[
-                        styles.divider,
+                        styles.deliveryIcon,
                         {
-                          backgroundColor: colors.border,
-                          marginVertical: 16,
+                          backgroundColor: 'rgba(19, 236, 91, 0.15)',
                         },
                       ]}
-                    />
+                    >
+                      <IconSymbol name="info.circle.fill" size={20} color="#059669" />
+                    </View>
 
-                    <View style={styles.deliveryRow}>
-                      <View
+                    <View style={styles.deliveryInfo}>
+                      <ThemedText
                         style={[
-                          styles.deliveryIcon,
+                          styles.deliveryLabel,
                           {
-                            backgroundColor: 'rgba(19, 236, 91, 0.15)',
+                            color: colors.textSub,
                           },
                         ]}
                       >
-                        <IconSymbol
-                          name="info.circle.fill"
-                          size={20}
-                          color="#059669"
-                        />
-                      </View>
+                        КОММЕНТАРИЙ КУРЬЕРУ
+                      </ThemedText>
 
-                      <View style={styles.deliveryInfo}>
-                        <ThemedText
-                          style={[
-                            styles.deliveryLabel,
-                            {
-                              color: colors.textSub,
-                            },
-                          ]}
-                        >
-                          КОММЕНТАРИЙ КУРЬЕРУ
-                        </ThemedText>
-
-                        <ThemedText style={styles.deliveryValue}>
-                          {order.delivery_notes}
-                        </ThemedText>
-                      </View>
+                      <ThemedText style={styles.deliveryValue}>{order.delivery_notes}</ThemedText>
                     </View>
-                  </>
-                ) : null}
+                  </View>
+                </>
+              ) : null}
             </View>
           </View>
 
@@ -850,8 +755,7 @@ export default function OrderDetailScreen() {
             style={[
               styles.summaryCard,
               {
-                backgroundColor:
-                  colors.surface,
+                backgroundColor: colors.surface,
                 borderColor: colors.border,
               },
             ]}
@@ -868,13 +772,7 @@ export default function OrderDetailScreen() {
                 Стоимость товаров
               </ThemedText>
 
-              <ThemedText
-                style={styles.summaryValue}
-              >
-                {formatPrice(
-                  productsSubtotal,
-                )}
-              </ThemedText>
+              <ThemedText style={styles.summaryValue}>{formatPrice(productsSubtotal)}</ThemedText>
             </View>
 
             <View style={styles.summaryRow}>
@@ -893,18 +791,11 @@ export default function OrderDetailScreen() {
                 style={[
                   styles.summaryValue,
                   {
-                    color:
-                      deliveryCost === 0
-                        ? '#10b981'
-                        : colors.text,
+                    color: deliveryCost === 0 ? '#10b981' : colors.text,
                   },
                 ]}
               >
-                {deliveryCost === 0
-                  ? 'Бесплатно'
-                  : formatPrice(
-                      deliveryCost,
-                    )}
+                {deliveryCost === 0 ? 'Бесплатно' : formatPrice(deliveryCost)}
               </ThemedText>
             </View>
 
@@ -912,25 +803,16 @@ export default function OrderDetailScreen() {
               style={[
                 styles.divider,
                 {
-                  backgroundColor:
-                    colors.border,
+                  backgroundColor: colors.border,
                   marginVertical: 8,
                 },
               ]}
             />
 
             <View style={styles.summaryRow}>
-              <ThemedText
-                style={styles.totalLabel}
-              >
-                Итого
-              </ThemedText>
+              <ThemedText style={styles.totalLabel}>Итого</ThemedText>
 
-              <ThemedText
-                style={styles.totalValue}
-              >
-                {formatPrice(total)}
-              </ThemedText>
+              <ThemedText style={styles.totalValue}>{formatPrice(total)}</ThemedText>
             </View>
           </View>
 
@@ -945,16 +827,35 @@ export default function OrderDetailScreen() {
               ]}
               onPress={() => router.replace('/(tabs)')}
             >
-              <IconSymbol
-                name="house.fill"
-                size={20}
-                color={colors.text}
-              />
+              <IconSymbol name="house.fill" size={20} color={colors.text} />
 
-              <ThemedText style={styles.homeButtonText}>
-                На главную
-              </ThemedText>
+              <ThemedText style={styles.homeButtonText}>На главную</ThemedText>
             </TouchableOpacity>
+
+            {canPay && (
+              <TouchableOpacity
+                style={[
+                  styles.repeatButton,
+                  {
+                    opacity: isPaying ? 0.6 : 1,
+                  },
+                ]}
+                onPress={handlePayOrder}
+                disabled={isPaying}
+              >
+                {isPaying ? (
+                  <ActivityIndicator size="small" color="#102216" />
+                ) : (
+                  <>
+                    <IconSymbol name="creditcard" size={20} color="#102216" />
+
+                    <ThemedText style={styles.repeatButtonText}>
+                      {order.payment_status === 'failed' ? 'Повторить оплату' : 'Оплатить заказ'}
+                    </ThemedText>
+                  </>
+                )}
+              </TouchableOpacity>
+            )}
 
             {canRepeat && (
               <TouchableOpacity
@@ -968,17 +869,9 @@ export default function OrderDetailScreen() {
                   })
                 }
               >
-                <IconSymbol
-                  name="arrow.clockwise"
-                  size={20}
-                  color="#102216"
-                />
+                <IconSymbol name="arrow.clockwise" size={20} color="#102216" />
 
-                <ThemedText
-                  style={styles.repeatButtonText}
-                >
-                  Повторить заказ
-                </ThemedText>
+                <ThemedText style={styles.repeatButtonText}>Повторить заказ</ThemedText>
               </TouchableOpacity>
             )}
 
@@ -987,37 +880,21 @@ export default function OrderDetailScreen() {
                 style={[
                   styles.cancelButton,
                   {
-                    backgroundColor:
-                      colorScheme === 'dark'
-                        ? 'rgba(239, 68, 68, 0.1)'
-                        : '#fef2f2',
+                    backgroundColor: colorScheme === 'dark' ? 'rgba(239, 68, 68, 0.1)' : '#fef2f2',
                   },
                 ]}
                 onPress={() =>
                   router.push({
-                    pathname:
-                      '/cancel-order',
+                    pathname: '/cancel-order',
                     params: {
-                      id: String(
-                        order.id,
-                      ),
+                      id: String(order.id),
                     },
                   })
                 }
               >
-                <IconSymbol
-                  name="xmark"
-                  size={20}
-                  color="#ef4444"
-                />
+                <IconSymbol name="xmark" size={20} color="#ef4444" />
 
-                <ThemedText
-                  style={
-                    styles.cancelButtonText
-                  }
-                >
-                  Отменить заказ
-                </ThemedText>
+                <ThemedText style={styles.cancelButtonText}>Отменить заказ</ThemedText>
               </TouchableOpacity>
             )}
           </View>

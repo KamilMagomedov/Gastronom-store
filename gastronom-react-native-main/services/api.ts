@@ -278,6 +278,9 @@ export interface ApiOrder {
     id: number;
     label: string;
     description: string;
+    is_online: boolean;
+    acquirer_code: string | null;
+    payment_method_type: 'bank_card' | 'sbp' | null;
   };
 
   delivery_address?: string | null;
