@@ -48,7 +48,9 @@
           }
         }
       ],
-      "react-native-yamap-plus"
+      "react-native-yamap-plus",
+      "expo-font",
+      "expo-web-browser"
     ],
     "experiments": {
       "typedRoutes": true,
