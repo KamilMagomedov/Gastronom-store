@@ -48,12 +48,7 @@
           }
         }
       ],
-      [
-        "react-native-yamap-plus",
-        {
-          "apikey": "d09d333a-47cc-46e9-9f40-ca543b5ff126"
-        }
-      ]
+      "react-native-yamap-plus"
     ],
     "experiments": {
       "typedRoutes": true,

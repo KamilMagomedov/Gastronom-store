@@ -333,7 +333,7 @@ export default function CheckoutScreen() {
                   allowFullScreen
                 />
               ) : (
-                <MobileMap apiKey="d09d333a-47cc-46e9-9f40-ca543b5ff126" />
+                <MobileMap />
               )
             ) : (
               <View

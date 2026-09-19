@@ -1,7 +1,3 @@
-interface MobileMapProps {
-  apiKey: string;
-}
-
-export default function MobileMap({ apiKey }: MobileMapProps) {
+export default function MobileMap() {
   return null;
-} 
+}
