@@ -1,5 +1,8 @@
-// const API_BASE_URL = 'https://gastronom-mob.adminstore.top/api';
-const API_BASE_URL = 'http://127.0.0.1:8000/api';
+const API_BASE_URL = process.env.EXPO_PUBLIC_API_URL?.replace(/\/+$/, '');
+
+if (!API_BASE_URL) {
+  throw new Error('EXPO_PUBLIC_API_URL is not configured');
+}
 
 export interface RegistrationData {
   name: string;
