@@ -202,7 +202,7 @@ export default function OrderDetailScreen() {
 
       showAlert(
         'Не удалось запустить оплату',
-        paymentError?.message || 'Попробуйте повторить оплату позже.',
+        'Сервис оплаты временно недоступен. Попробуйте повторить оплату позже.',
       );
     } finally {
       setIsPaying(false);
