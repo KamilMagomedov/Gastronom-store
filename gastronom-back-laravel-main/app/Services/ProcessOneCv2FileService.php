@@ -9,6 +9,7 @@ use App\Repositories\CategoryRepository;
 use App\Repositories\ProductRepository;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Storage;
+use Illuminate\Support\Str;
 use SimpleXMLElement;
 use XMLReader;
 
@@ -57,7 +58,23 @@ class ProcessOneCv2FileService
 
     protected function sanitizeFilename(string $filename): string
     {
-        return ltrim($filename, '/');
+        $filename = str_replace('\\', '/', $filename);
+
+        if ($filename === '' || str_contains($filename, "\0")) {
+            throw new \InvalidArgumentException('Invalid 1C filename');
+        }
+
+        if (str_starts_with($filename, '/')) {
+            throw new \InvalidArgumentException('Absolute paths are not allowed');
+        }
+
+        $segments = explode('/', $filename);
+
+        if (in_array('..', $segments, true) || in_array('.', $segments, true)) {
+            throw new \InvalidArgumentException('Path traversal is not allowed');
+        }
+
+        return $filename;
     }
 
     private function updateSyncLogWithStats(SyncLog $syncLog, string $message, array $stats, string $fileType): void
@@ -512,7 +529,7 @@ class ProcessOneCv2FileService
         $categoryData = [
             'external_id' => $groupId,
             'name' => $groupName,
-            'slug' => \Str::slug($groupName.'-'.$groupId),
+            'slug' => Str::slug($groupName.'-'.$groupId),
             'is_active' => true,
             'is_system' => false,
             'sort_order' => 0,
@@ -609,7 +626,7 @@ class ProcessOneCv2FileService
 
     private function generateSlug(string $name, string $externalId): string
     {
-        $baseSlug = \Str::slug($name.'-'.$externalId);
+        $baseSlug = Str::slug($name.'-'.$externalId);
         $slug = $baseSlug;
         $number = 1;
 
