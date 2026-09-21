@@ -214,7 +214,7 @@ class ProcessOneCv2FileService
                     $result = $this->processOffer($offerXml);
                     $processedCount++;
 
-                    if ($result['is_new']) {
+                    if ($result['product'] !== null) {
                         $updatedCount++;
                     }
 
@@ -352,7 +352,6 @@ class ProcessOneCv2FileService
 
             return [
                 'product' => null,
-                'is_new' => false,
                 'is_deleted' => $isDeleted,
                 'external_id' => $externalId,
             ];
@@ -377,7 +376,6 @@ class ProcessOneCv2FileService
 
         return [
             'product' => $product,
-            'is_new' => true, // считаем обновлением
             'is_deleted' => $isDeleted,
             'external_id' => $externalId,
         ];
