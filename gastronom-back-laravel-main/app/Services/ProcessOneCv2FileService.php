@@ -360,7 +360,11 @@ class ProcessOneCv2FileService
 
         if (isset($offerXml->Наименование) && ! empty((string) $offerXml->Наименование)) {
             $product->name = (string) $offerXml->Наименование;
-            $product->slug = $this->generateSlug($product->name, $product->external_id);
+            $product->slug = $this->generateSlug(
+                $product->name,
+                $product->external_id,
+                $product->id
+            );
         }
 
         if ($isDeleted) {
@@ -547,7 +551,11 @@ class ProcessOneCv2FileService
     {
         if (isset($xml->Наименование) && ! empty((string) $xml->Наименование)) {
             $product->name = (string) $xml->Наименование;
-            $product->slug = $this->generateSlug($product->name, $product->external_id);
+            $product->slug = $this->generateSlug(
+                $product->name,
+                $product->external_id,
+                $product->id
+            );
         }
 
         if (isset($xml->Артикул) && ! empty((string) $xml->Артикул)) {
@@ -624,18 +632,29 @@ class ProcessOneCv2FileService
         return $units[$unitCode] ?? 'шт';
     }
 
-    private function generateSlug(string $name, string $externalId): string
+    private function generateSlug(
+        string $name,
+        string $externalId,
+        ?int $excludeProductId = null
+    ): string
     {
         $baseSlug = Str::slug($name.'-'.$externalId);
         $slug = $baseSlug;
         $number = 1;
 
-        // Проверяем только если товар уже существует в базе
-        $existingProduct = $this->productRepository->findBySlug($slug);
+        $existingProduct = $this->productRepository->findBySlugAndNotId(
+            $slug,
+            $excludeProductId
+        );
 
         while ($existingProduct !== null) {
             $slug = $baseSlug.'-'.$number;
-            $existingProduct = $this->productRepository->findBySlug($slug);
+
+            $existingProduct = $this->productRepository->findBySlugAndNotId(
+                $slug,
+                $excludeProductId
+            );
+
             $number++;
         }
 

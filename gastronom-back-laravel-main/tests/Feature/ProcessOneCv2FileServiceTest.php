@@ -2,6 +2,7 @@
 
 namespace Tests\Feature;
 
+use App\Models\Product;
 use App\Services\ProcessOneCv2FileService;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\Storage;
@@ -66,5 +67,99 @@ class ProcessOneCv2FileServiceTest extends TestCase
         $this->expectException(InvalidArgumentException::class);
 
         $this->service->processFile('/import__evil.xml');
+    }
+
+    public function test_reimporting_same_product_keeps_same_product_and_slug(): void
+    {
+        $filename = 'import__slug_idempotency.xml';
+
+        $xml = <<<'XML'
+    <?xml version="1.0" encoding="UTF-8"?>
+    <КоммерческаяИнформация>
+        <Каталог>
+            <Товары>
+                <Товар>
+                    <Ид>product-slug-001</Ид>
+                    <Артикул>ART-SLUG-001</Артикул>
+                    <Наименование>Тестовый товар</Наименование>
+                </Товар>
+            </Товары>
+        </Каталог>
+    </КоммерческаяИнформация>
+    XML;
+
+        Storage::disk('local')->put("onec_v2/{$filename}", $xml);
+
+        $this->service->processFile($filename);
+
+        $firstProduct = Product::where('external_id', 'product-slug-001')->firstOrFail();
+        $firstProductId = $firstProduct->id;
+        $firstSlug = $firstProduct->slug;
+
+        $this->service->processFile($filename);
+
+        $secondProduct = Product::where('external_id', 'product-slug-001')->firstOrFail();
+
+        $this->assertSame(1, Product::where('external_id', 'product-slug-001')->count());
+        $this->assertSame($firstProductId, $secondProduct->id);
+        $this->assertSame($firstSlug, $secondProduct->slug);
+    }
+
+    public function test_reimporting_same_offer_keeps_same_product_and_slug(): void
+    {
+        $importFilename = 'import__offer_slug.xml';
+
+        $importXml = <<<'XML'
+    <?xml version="1.0" encoding="UTF-8"?>
+    <КоммерческаяИнформация>
+        <Каталог>
+            <Товары>
+                <Товар>
+                    <Ид>product-offer-001</Ид>
+                    <Артикул>ART-OFFER-001</Артикул>
+                    <Наименование>Исходный товар</Наименование>
+                </Товар>
+            </Товары>
+        </Каталог>
+    </КоммерческаяИнформация>
+    XML;
+
+        Storage::disk('local')->put("onec_v2/{$importFilename}", $importXml);
+
+        $this->service->processFile($importFilename);
+
+        $product = Product::where('external_id', 'product-offer-001')->firstOrFail();
+        $productId = $product->id;
+
+        $offersFilename = 'offers__slug_idempotency.xml';
+
+        $offersXml = <<<'XML'
+    <?xml version="1.0" encoding="UTF-8"?>
+    <КоммерческаяИнформация>
+        <ПакетПредложений>
+            <Предложения>
+                <Предложение>
+                    <Ид>product-offer-001</Ид>
+                    <Наименование>Обновленный товар</Наименование>
+                </Предложение>
+            </Предложения>
+        </ПакетПредложений>
+    </КоммерческаяИнформация>
+    XML;
+
+        Storage::disk('local')->put("onec_v2/{$offersFilename}", $offersXml);
+
+        $this->service->processFile($offersFilename);
+
+        $firstOfferProduct = Product::where('external_id', 'product-offer-001')->firstOrFail();
+        $firstOfferSlug = $firstOfferProduct->slug;
+
+        $this->service->processFile($offersFilename);
+
+        $secondOfferProduct = Product::where('external_id', 'product-offer-001')->firstOrFail();
+
+        $this->assertSame(1, Product::where('external_id', 'product-offer-001')->count());
+        $this->assertSame($productId, $secondOfferProduct->id);
+        $this->assertSame($firstOfferSlug, $secondOfferProduct->slug);
     }
 }
