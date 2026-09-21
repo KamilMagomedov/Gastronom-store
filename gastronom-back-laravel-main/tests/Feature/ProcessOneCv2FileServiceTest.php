@@ -490,4 +490,81 @@ class ProcessOneCv2FileServiceTest extends TestCase
         $this->assertSame(10, $product->stock_quantity);
         $this->assertTrue($product->in_stock);
     }
+
+    public function test_prices_file_updates_single_price_and_representation(): void
+    {
+        Product::create([
+            'external_id' => 'product-price-001',
+            'name' => 'Товар с ценой',
+            'slug' => 'product-price-001',
+            'price' => 50,
+        ]);
+
+        $filename = 'prices__single_price.xml';
+
+        $xml = <<<'XML'
+    <?xml version="1.0" encoding="UTF-8"?>
+    <КоммерческаяИнформация>
+        <ПакетПредложений>
+            <Предложения>
+                <Предложение>
+                    <Ид>product-price-001</Ид>
+                    <Цены>
+                        <Цена>
+                            <Представление>86,18 RUB за шт</Представление>
+                            <ЦенаЗаЕдиницу>86.18</ЦенаЗаЕдиницу>
+                            <Валюта>RUB</Валюта>
+                        </Цена>
+                    </Цены>
+                </Предложение>
+            </Предложения>
+        </ПакетПредложений>
+    </КоммерческаяИнформация>
+    XML;
+
+        Storage::disk('local')->put("onec_v2/{$filename}", $xml);
+
+        $this->service->processFile($filename);
+
+        $product = Product::where('external_id', 'product-price-001')->firstOrFail();
+
+        $this->assertSame('86.18', $product->price);
+        $this->assertSame('86,18 RUB за шт', $product->price_representation);
+    }
+
+    public function test_prices_file_does_not_count_missing_product_as_updated(): void
+    {
+        $filename = 'prices__missing_product.xml';
+
+        $xml = <<<'XML'
+    <?xml version="1.0" encoding="UTF-8"?>
+    <КоммерческаяИнформация>
+        <ПакетПредложений>
+            <Предложения>
+                <Предложение>
+                    <Ид>missing-product-001</Ид>
+                    <Цены>
+                        <Цена>
+                            <Представление>100 RUB за шт</Представление>
+                            <ЦенаЗаЕдиницу>100</ЦенаЗаЕдиницу>
+                            <Валюта>RUB</Валюта>
+                        </Цена>
+                    </Цены>
+                </Предложение>
+            </Предложения>
+        </ПакетПредложений>
+    </КоммерческаяИнформация>
+    XML;
+
+        Storage::disk('local')->put("onec_v2/{$filename}", $xml);
+
+        $this->service->processFile($filename);
+
+        $syncLog = \App\Models\SyncLog::where('source', '1C')
+            ->latest('id')
+            ->firstOrFail();
+
+        $this->assertSame(1, $syncLog->data['prices_processed']);
+        $this->assertSame(0, $syncLog->data['prices_updated']);
+    }
 }

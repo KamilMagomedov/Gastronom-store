@@ -261,7 +261,7 @@ class ProcessOneCv2FileService
                     $result = $this->processPrice($offerXml);
                     $processedCount++;
 
-                    if (! $result['is_new']) {
+                    if ($result['product'] !== null) {
                         $updatedCount++;
                     }
                 }
