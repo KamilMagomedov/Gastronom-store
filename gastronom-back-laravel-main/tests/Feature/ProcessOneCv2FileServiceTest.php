@@ -646,4 +646,46 @@ class ProcessOneCv2FileServiceTest extends TestCase
         $this->assertSame(0, $syncLog->data['offers_updated']);
         $this->assertSame(0, $syncLog->data['offers_deleted']);
     }
+
+    public function test_existing_deleted_offer_is_counted_as_updated_and_deleted(): void
+    {
+        Product::create([
+            'external_id' => 'product-delete-001',
+            'name' => 'Товар для удаления',
+            'slug' => 'product-delete-001',
+            'price' => 100,
+            'is_active' => true,
+        ]);
+
+        $filename = 'offers__existing_deleted.xml';
+
+        $xml = <<<'XML'
+    <?xml version="1.0" encoding="UTF-8"?>
+    <КоммерческаяИнформация>
+        <ПакетПредложений>
+            <Предложения>
+                <Предложение>
+                    <Ид>product-delete-001</Ид>
+                    <ПометкаУдаления>true</ПометкаУдаления>
+                </Предложение>
+            </Предложения>
+        </ПакетПредложений>
+    </КоммерческаяИнформация>
+    XML;
+
+        Storage::disk('local')->put("onec_v2/{$filename}", $xml);
+
+        $this->service->processFile($filename);
+
+        $product = Product::where('external_id', 'product-delete-001')->firstOrFail();
+
+        $syncLog = \App\Models\SyncLog::where('source', '1C')
+            ->latest('id')
+            ->firstOrFail();
+
+        $this->assertFalse($product->is_active);
+        $this->assertSame(1, $syncLog->data['offers_processed']);
+        $this->assertSame(1, $syncLog->data['offers_updated']);
+        $this->assertSame(1, $syncLog->data['offers_deleted']);
+    }
 }
