@@ -148,7 +148,10 @@ class PaymentControllerTest extends TestCase
             ],
         ];
 
-        $response = $this->postJson(route('api.payments.webhook'), $payload);
+        $response = $this->postJson(
+            route('api.payments.webhook', ['gateway' => 'sberbank']),
+            $payload
+        );
 
         $response->assertStatus(200);
 
@@ -193,7 +196,10 @@ class PaymentControllerTest extends TestCase
             ],
         ];
 
-        $response = $this->postJson(route('api.payments.webhook'), $payload);
+        $response = $this->postJson(
+            route('api.payments.webhook', ['gateway' => 'sberbank']),
+            $payload
+        );
 
         $response->assertStatus(200);
 
@@ -253,38 +259,52 @@ class PaymentControllerTest extends TestCase
     {
         $customer = Customer::factory()->create();
         $paymentMethod = PaymentMethod::factory()->sbp()->create();
+
         $order = Order::factory()->create([
             'customer_id' => $customer->id,
             'payment_method_id' => $paymentMethod->id,
             'payment_status' => 'pending',
         ]);
 
+        $acquirer = $paymentMethod->acquirer()->firstOrFail();
+
+        $paymentId = '900000'.$order->id;
+
         $payload = [
-            'gateway' => 'tinkoff',
-            'event' => 'payment.succeeded',
-            'object' => [
-                'id' => 'sbp-txn-'.$order->id,
-                'amount' => [
-                    'value' => (string) $order->total_amount,
-                    'currency' => 'RUB',
-                ],
-                'payment_method' => [
-                    'type' => 'sbp',
-                ],
-                'metadata' => [
-                    'order_id' => (string) $order->id,
-                    'customer_id' => (string) $customer->id,
-                ],
-            ],
+            'TerminalKey' => $acquirer->config['terminal_key'],
+            'OrderId' => (string) $order->id,
+            'Success' => true,
+            'Status' => 'CONFIRMED',
+            'PaymentId' => $paymentId,
+            'ErrorCode' => '0',
+            'Amount' => (int) round(((float) $order->total_amount) * 100),
         ];
 
-        $response = $this->postJson(route('api.payments.webhook'), $payload);
+        $tokenData = $payload;
+        $tokenData['Password'] = $acquirer->config['secret_key'];
+
+        ksort($tokenData);
+
+        $payload['Token'] = hash(
+            'sha256',
+            implode('', array_map(
+                static fn ($value) => (string) $value,
+                $tokenData
+            ))
+        );
+
+        $response = $this->postJson(
+            route('api.payments.webhook', ['gateway' => 'tinkoff']),
+            $payload
+        );
 
         $response->assertStatus(200);
 
+        $this->assertSame('OK', $response->getContent());
+
         $this->assertDatabaseHas('transactions', [
             'order_id' => $order->id,
-            'gateway_transaction_id' => 'sbp-txn-'.$order->id,
+            'gateway_transaction_id' => $paymentId,
             'status' => 'completed',
         ]);
 
