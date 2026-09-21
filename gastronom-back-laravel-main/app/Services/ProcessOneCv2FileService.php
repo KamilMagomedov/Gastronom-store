@@ -473,8 +473,9 @@ class ProcessOneCv2FileService
             $totalStock = 0;
 
             foreach ($restXml->Остатки->Остаток as $item) {
-
-                if (isset($item->Склад->Количество)) {
+                if (isset($item->Количество)) {
+                    $totalStock += (float) $item->Количество;
+                } elseif (isset($item->Склад->Количество)) {
                     $totalStock += (float) $item->Склад->Количество;
                 }
             }

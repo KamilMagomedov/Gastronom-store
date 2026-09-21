@@ -339,4 +339,155 @@ class ProcessOneCv2FileServiceTest extends TestCase
         $this->assertSame($secondCategory->id, $updatedProduct->category_id);
         $this->assertNotSame($firstCategory->id, $updatedProduct->category_id);
     }
+
+    public function test_rests_file_updates_stock_from_direct_quantity(): void
+    {
+        $importFilename = 'import__rest_product.xml';
+
+        $importXml = <<<'XML'
+    <?xml version="1.0" encoding="UTF-8"?>
+    <КоммерческаяИнформация>
+        <Каталог>
+            <Товары>
+                <Товар>
+                    <Ид>product-rest-001</Ид>
+                    <Артикул>ART-REST-001</Артикул>
+                    <Наименование>Товар с остатком</Наименование>
+                </Товар>
+            </Товары>
+        </Каталог>
+    </КоммерческаяИнформация>
+    XML;
+
+        Storage::disk('local')->put("onec_v2/{$importFilename}", $importXml);
+
+        $this->service->processFile($importFilename);
+
+        $restsFilename = 'rests__direct_quantity.xml';
+
+        $restsXml = <<<'XML'
+    <?xml version="1.0" encoding="UTF-8"?>
+    <КоммерческаяИнформация>
+        <ПакетПредложений>
+            <Предложения>
+                <Предложение>
+                    <Ид>product-rest-001</Ид>
+                    <Остатки>
+                        <Остаток>
+                            <Количество>10</Количество>
+                        </Остаток>
+                    </Остатки>
+                </Предложение>
+            </Предложения>
+        </ПакетПредложений>
+    </КоммерческаяИнформация>
+    XML;
+
+        Storage::disk('local')->put("onec_v2/{$restsFilename}", $restsXml);
+
+        $this->service->processFile($restsFilename);
+
+        $product = Product::where('external_id', 'product-rest-001')->firstOrFail();
+
+        $this->assertSame(10, $product->stock_quantity);
+        $this->assertTrue($product->in_stock);
+    }
+
+    public function test_rests_file_updates_stock_from_nested_warehouse_quantity(): void
+    {
+        Product::create([
+            'external_id' => 'product-rest-warehouse-001',
+            'name' => 'Товар со складскими остатками',
+            'slug' => 'product-rest-warehouse-001',
+            'price' => 100,
+            'stock_quantity' => 0,
+            'in_stock' => false,
+        ]);
+
+        $filename = 'rests__warehouse_quantity.xml';
+
+        $xml = <<<'XML'
+    <?xml version="1.0" encoding="UTF-8"?>
+    <КоммерческаяИнформация>
+        <ПакетПредложений>
+            <Предложения>
+                <Предложение>
+                    <Ид>product-rest-warehouse-001</Ид>
+                    <Остатки>
+                        <Остаток>
+                            <Склад>
+                                <Количество>4</Количество>
+                            </Склад>
+                        </Остаток>
+                        <Остаток>
+                            <Склад>
+                                <Количество>6</Количество>
+                            </Склад>
+                        </Остаток>
+                    </Остатки>
+                </Предложение>
+            </Предложения>
+        </ПакетПредложений>
+    </КоммерческаяИнформация>
+    XML;
+
+        Storage::disk('local')->put("onec_v2/{$filename}", $xml);
+
+        $this->service->processFile($filename);
+
+        $product = Product::where(
+            'external_id',
+            'product-rest-warehouse-001'
+        )->firstOrFail();
+
+        $this->assertSame(10, $product->stock_quantity);
+        $this->assertTrue($product->in_stock);
+    }
+
+    public function test_rests_file_sums_multiple_direct_quantities(): void
+    {
+        Product::create([
+            'external_id' => 'product-rest-multiple-001',
+            'name' => 'Товар с несколькими остатками',
+            'slug' => 'product-rest-multiple-001',
+            'price' => 100,
+            'stock_quantity' => 0,
+            'in_stock' => false,
+        ]);
+
+        $filename = 'rests__multiple_direct_quantities.xml';
+
+        $xml = <<<'XML'
+    <?xml version="1.0" encoding="UTF-8"?>
+    <КоммерческаяИнформация>
+        <ПакетПредложений>
+            <Предложения>
+                <Предложение>
+                    <Ид>product-rest-multiple-001</Ид>
+                    <Остатки>
+                        <Остаток>
+                            <Количество>4</Количество>
+                        </Остаток>
+                        <Остаток>
+                            <Количество>6</Количество>
+                        </Остаток>
+                    </Остатки>
+                </Предложение>
+            </Предложения>
+        </ПакетПредложений>
+    </КоммерческаяИнформация>
+    XML;
+
+        Storage::disk('local')->put("onec_v2/{$filename}", $xml);
+
+        $this->service->processFile($filename);
+
+        $product = Product::where(
+            'external_id',
+            'product-rest-multiple-001'
+        )->firstOrFail();
+
+        $this->assertSame(10, $product->stock_quantity);
+        $this->assertTrue($product->in_stock);
+    }
 }
