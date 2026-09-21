@@ -710,7 +710,7 @@ class ProcessOneCv2FileService
 
         Log::channel('onec')->info('Импорт полностью завершен', [
             'sync_log_id' => $syncLog->id,
-            'filename' => $syncLog->filename,
+            'filename' => $syncLog->data['filename'] ?? null,
         ]);
     }
 
@@ -728,7 +728,7 @@ class ProcessOneCv2FileService
 
         Log::channel('onec')->error('Import failed', [
             'sync_log_id' => $syncLog->id,
-            'filename' => $syncLog->filename,
+            'filename' => $syncLog->data['filename'] ?? null,
             'error' => $errorMessage,
         ]);
     }
