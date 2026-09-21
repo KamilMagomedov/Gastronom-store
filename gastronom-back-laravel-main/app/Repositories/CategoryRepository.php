@@ -22,8 +22,11 @@ class CategoryRepository extends BaseRepository
         $category = $this->findByExternalId($data['external_id']);
 
         if (! $category) {
-            $category = $this->create($data);
+            return $this->newQuery()->create($data);
         }
+
+        $category->fill($data);
+        $category->save();
 
         return $category;
     }

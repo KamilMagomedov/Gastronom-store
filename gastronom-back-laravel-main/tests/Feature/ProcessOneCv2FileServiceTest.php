@@ -2,6 +2,7 @@
 
 namespace Tests\Feature;
 
+use App\Models\Category;
 use App\Models\Product;
 use App\Services\ProcessOneCv2FileService;
 use Illuminate\Foundation\Testing\RefreshDatabase;
@@ -161,5 +162,57 @@ class ProcessOneCv2FileServiceTest extends TestCase
         $this->assertSame(1, Product::where('external_id', 'product-offer-001')->count());
         $this->assertSame($productId, $secondOfferProduct->id);
         $this->assertSame($firstOfferSlug, $secondOfferProduct->slug);
+    }
+
+    public function test_reimporting_category_updates_existing_category(): void
+    {
+        $filename = 'import__category_update.xml';
+
+        $firstXml = <<<'XML'
+    <?xml version="1.0" encoding="UTF-8"?>
+    <КоммерческаяИнформация>
+        <Каталог>
+            <Группы>
+                <Группа>
+                    <Ид>category-001</Ид>
+                    <Наименование>Напитки</Наименование>
+                </Группа>
+            </Группы>
+        </Каталог>
+    </КоммерческаяИнформация>
+    XML;
+
+        Storage::disk('local')->put("onec_v2/{$filename}", $firstXml);
+
+        $this->service->processFile($filename);
+
+        $firstCategory = Category::where('external_id', 'category-001')->firstOrFail();
+        $firstCategoryId = $firstCategory->id;
+        $firstSlug = $firstCategory->slug;
+
+        $secondXml = <<<'XML'
+    <?xml version="1.0" encoding="UTF-8"?>
+    <КоммерческаяИнформация>
+        <Каталог>
+            <Группы>
+                <Группа>
+                    <Ид>category-001</Ид>
+                    <Наименование>Напитки и соки</Наименование>
+                </Группа>
+            </Группы>
+        </Каталог>
+    </КоммерческаяИнформация>
+    XML;
+
+        Storage::disk('local')->put("onec_v2/{$filename}", $secondXml);
+
+        $this->service->processFile($filename);
+
+        $secondCategory = Category::where('external_id', 'category-001')->firstOrFail();
+
+        $this->assertSame(1, Category::where('external_id', 'category-001')->count());
+        $this->assertSame($firstCategoryId, $secondCategory->id);
+        $this->assertSame('Напитки и соки', $secondCategory->name);
+        $this->assertNotSame($firstSlug, $secondCategory->slug);
     }
 }
