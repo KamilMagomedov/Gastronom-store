@@ -369,4 +369,60 @@ class PaymentControllerTest extends TestCase
             'gateway_transaction_id' => $paymentId,
         ]);
     }
+
+    public function test_tinkoff_webhook_rejects_wrong_terminal_key(): void
+    {
+        $customer = Customer::factory()->create();
+        $paymentMethod = PaymentMethod::factory()->sbp()->create();
+
+        $order = Order::factory()->create([
+            'customer_id' => $customer->id,
+            'payment_method_id' => $paymentMethod->id,
+            'payment_status' => 'pending',
+        ]);
+
+        $acquirer = $paymentMethod->acquirer()->firstOrFail();
+
+        $paymentId = 'wrong-terminal-'.$order->id;
+
+        $payload = [
+            'TerminalKey' => 'foreign-terminal-key',
+            'OrderId' => (string) $order->id,
+            'Success' => true,
+            'Status' => 'CONFIRMED',
+            'PaymentId' => $paymentId,
+            'ErrorCode' => '0',
+            'Amount' => (int) round(((float) $order->total_amount) * 100),
+        ];
+
+        $tokenData = $payload;
+        $tokenData['Password'] = $acquirer->config['secret_key'];
+
+        ksort($tokenData);
+
+        $payload['Token'] = hash(
+            'sha256',
+            implode('', array_map(
+                static fn ($value) => (string) $value,
+                $tokenData
+            ))
+        );
+
+        $response = $this->postJson(
+            route('api.payments.webhook', ['gateway' => 'tinkoff']),
+            $payload
+        );
+
+        $response->assertStatus(400);
+
+        $this->assertDatabaseHas('orders', [
+            'id' => $order->id,
+            'payment_status' => 'pending',
+        ]);
+
+        $this->assertDatabaseMissing('transactions', [
+            'order_id' => $order->id,
+            'gateway_transaction_id' => $paymentId,
+        ]);
+    }
 }

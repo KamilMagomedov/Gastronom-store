@@ -89,6 +89,18 @@ class TinkoffGateway extends BaseAcquirerGateway implements PaymentGateway
             throw new \RuntimeException('Invalid Tinkoff webhook token');
         }
 
+        $terminalKey = $payload['TerminalKey'] ?? null;
+        $expectedTerminalKey = $this->config['terminal_key'] ?? null;
+
+        if (
+            ! is_string($terminalKey)
+            || ! is_string($expectedTerminalKey)
+            || $expectedTerminalKey === ''
+            || $terminalKey !== $expectedTerminalKey
+        ) {
+            throw new \RuntimeException('Invalid Tinkoff terminal key');
+        }
+
         $orderId = $payload['OrderId'] ?? null;
         $paymentId = $payload['PaymentId'] ?? null;
 
