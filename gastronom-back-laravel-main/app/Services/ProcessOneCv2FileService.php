@@ -218,7 +218,7 @@ class ProcessOneCv2FileService
                         $updatedCount++;
                     }
 
-                    if ($result['is_deleted']) {
+                    if ($result['product'] !== null && $result['is_deleted']) {
                         $deletedCount++;
                     }
                 }

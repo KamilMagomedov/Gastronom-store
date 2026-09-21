@@ -615,4 +615,35 @@ class ProcessOneCv2FileServiceTest extends TestCase
         $this->assertSame('success', $syncLog->status);
         $this->assertSame('completed', $syncLog->data['import_status']);
     }
+
+    public function test_missing_deleted_offer_is_not_counted_as_deleted(): void
+    {
+        $filename = 'offers__missing_deleted.xml';
+
+        $xml = <<<'XML'
+    <?xml version="1.0" encoding="UTF-8"?>
+    <КоммерческаяИнформация>
+        <ПакетПредложений>
+            <Предложения>
+                <Предложение>
+                    <Ид>missing-product-delete-001</Ид>
+                    <ПометкаУдаления>true</ПометкаУдаления>
+                </Предложение>
+            </Предложения>
+        </ПакетПредложений>
+    </КоммерческаяИнформация>
+    XML;
+
+        Storage::disk('local')->put("onec_v2/{$filename}", $xml);
+
+        $this->service->processFile($filename);
+
+        $syncLog = \App\Models\SyncLog::where('source', '1C')
+            ->latest('id')
+            ->firstOrFail();
+
+        $this->assertSame(1, $syncLog->data['offers_processed']);
+        $this->assertSame(0, $syncLog->data['offers_updated']);
+        $this->assertSame(0, $syncLog->data['offers_deleted']);
+    }
 }
