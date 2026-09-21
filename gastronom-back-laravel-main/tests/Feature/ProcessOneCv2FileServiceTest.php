@@ -215,4 +215,128 @@ class ProcessOneCv2FileServiceTest extends TestCase
         $this->assertSame('Напитки и соки', $secondCategory->name);
         $this->assertNotSame($firstSlug, $secondCategory->slug);
     }
+
+    public function test_import_assigns_product_to_category_from_1c_group(): void
+    {
+        $filename = 'import__product_category.xml';
+
+        $xml = <<<'XML'
+    <?xml version="1.0" encoding="UTF-8"?>
+    <КоммерческаяИнформация>
+        <Каталог>
+            <Группы>
+                <Группа>
+                    <Ид>category-drinks-001</Ид>
+                    <Наименование>Напитки</Наименование>
+                </Группа>
+            </Группы>
+
+            <Товары>
+                <Товар>
+                    <Ид>product-water-001</Ид>
+                    <Артикул>ART-WATER-001</Артикул>
+                    <Наименование>Минеральная вода</Наименование>
+                    <Группы>
+                        <Ид>category-drinks-001</Ид>
+                    </Группы>
+                </Товар>
+            </Товары>
+        </Каталог>
+    </КоммерческаяИнформация>
+    XML;
+
+        Storage::disk('local')->put("onec_v2/{$filename}", $xml);
+
+        $this->service->processFile($filename);
+
+        $category = Category::where('external_id', 'category-drinks-001')->firstOrFail();
+        $product = Product::where('external_id', 'product-water-001')->firstOrFail();
+
+        $this->assertSame($category->id, $product->category_id);
+    }
+
+    public function test_reimporting_product_moves_it_to_new_category(): void
+    {
+        $filename = 'import__product_category_move.xml';
+
+        $firstXml = <<<'XML'
+    <?xml version="1.0" encoding="UTF-8"?>
+    <КоммерческаяИнформация>
+        <Каталог>
+            <Группы>
+                <Группа>
+                    <Ид>category-drinks-001</Ид>
+                    <Наименование>Напитки</Наименование>
+                </Группа>
+                <Группа>
+                    <Ид>category-water-001</Ид>
+                    <Наименование>Вода</Наименование>
+                </Группа>
+            </Группы>
+
+            <Товары>
+                <Товар>
+                    <Ид>product-water-move-001</Ид>
+                    <Артикул>ART-WATER-MOVE-001</Артикул>
+                    <Наименование>Минеральная вода</Наименование>
+                    <Группы>
+                        <Ид>category-drinks-001</Ид>
+                    </Группы>
+                </Товар>
+            </Товары>
+        </Каталог>
+    </КоммерческаяИнформация>
+    XML;
+
+        Storage::disk('local')->put("onec_v2/{$filename}", $firstXml);
+
+        $this->service->processFile($filename);
+
+        $firstCategory = Category::where('external_id', 'category-drinks-001')->firstOrFail();
+        $product = Product::where('external_id', 'product-water-move-001')->firstOrFail();
+
+        $productId = $product->id;
+
+        $this->assertSame($firstCategory->id, $product->category_id);
+
+        $secondXml = <<<'XML'
+    <?xml version="1.0" encoding="UTF-8"?>
+    <КоммерческаяИнформация>
+        <Каталог>
+            <Группы>
+                <Группа>
+                    <Ид>category-drinks-001</Ид>
+                    <Наименование>Напитки</Наименование>
+                </Группа>
+                <Группа>
+                    <Ид>category-water-001</Ид>
+                    <Наименование>Вода</Наименование>
+                </Группа>
+            </Группы>
+
+            <Товары>
+                <Товар>
+                    <Ид>product-water-move-001</Ид>
+                    <Артикул>ART-WATER-MOVE-001</Артикул>
+                    <Наименование>Минеральная вода</Наименование>
+                    <Группы>
+                        <Ид>category-water-001</Ид>
+                    </Группы>
+                </Товар>
+            </Товары>
+        </Каталог>
+    </КоммерческаяИнформация>
+    XML;
+
+        Storage::disk('local')->put("onec_v2/{$filename}", $secondXml);
+
+        $this->service->processFile($filename);
+
+        $secondCategory = Category::where('external_id', 'category-water-001')->firstOrFail();
+        $updatedProduct = Product::where('external_id', 'product-water-move-001')->firstOrFail();
+
+        $this->assertSame($productId, $updatedProduct->id);
+        $this->assertSame($secondCategory->id, $updatedProduct->category_id);
+        $this->assertNotSame($firstCategory->id, $updatedProduct->category_id);
+    }
 }

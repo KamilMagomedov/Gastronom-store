@@ -566,6 +566,32 @@ class ProcessOneCv2FileService
             $product->description = (string) $xml->Описание;
         }
 
+        if (isset($xml->Группы->Ид)) {
+            $groupIds = $xml->Группы->Ид;
+
+            if (count($groupIds) === 1) {
+                $categoryExternalId = trim((string) $groupIds[0]);
+
+                if ($categoryExternalId !== '') {
+                    $category = $this->categoryRepository->findByExternalId($categoryExternalId);
+
+                    if ($category) {
+                        $product->category_id = $category->id;
+                    } else {
+                        Log::channel('onec')->warning('Category not found for product', [
+                            'product_external_id' => $product->external_id,
+                            'category_external_id' => $categoryExternalId,
+                        ]);
+                    }
+                }
+            } else {
+                Log::channel('onec')->warning('Product has multiple 1C groups; category was not assigned', [
+                    'product_external_id' => $product->external_id,
+                    'groups_count' => count($groupIds),
+                ]);
+            }
+        }
+
         if (isset($xml->Цены->Цена)) {
             $price = (float) $xml->Цены->Цена;
             $product->price = $price > 0 ? $price : $product->price;
