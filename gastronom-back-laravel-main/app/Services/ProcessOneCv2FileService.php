@@ -423,17 +423,22 @@ class ProcessOneCv2FileService
             $price = $minItem['price'];
             $pricePresentation = $minItem['presentation'];
 
-            $oldPrice = $maxItem['price'];
-            $oldPricePresentation = $maxItem['presentation'];
+            $oldPrice = $collection->count() > 1 ? $maxItem['price'] : null;
+            $oldPricePresentation = $collection->count() > 1
+                ? $maxItem['presentation']
+                : null;
 
             if ($price > 0) {
                 $product->price = $price;
                 $product->price_representation = $pricePresentation;
             }
 
-            if ($oldPrice > 0) {
+            if ($oldPrice !== null && $oldPrice > 0) {
                 $product->old_price = $oldPrice;
                 $product->old_price_representation = $oldPricePresentation;
+            } elseif ($collection->count() === 1 && $price > 0) {
+                $product->old_price = null;
+                $product->old_price_representation = null;
             }
 
             if ($price > 0 || $oldPrice > 0) {

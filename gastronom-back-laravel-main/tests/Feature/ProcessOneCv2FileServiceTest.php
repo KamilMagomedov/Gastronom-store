@@ -494,11 +494,13 @@ class ProcessOneCv2FileServiceTest extends TestCase
     public function test_prices_file_updates_single_price_and_representation(): void
     {
         Product::create([
-            'external_id' => 'product-price-001',
-            'name' => 'Товар с ценой',
-            'slug' => 'product-price-001',
-            'price' => 50,
-        ]);
+          'external_id' => 'product-price-001',
+          'name' => 'Товар с ценой',
+          'slug' => 'product-price-001',
+          'price' => 50,
+          'old_price' => 70,
+          'old_price_representation' => '70 RUB за шт',
+      ]);
 
         $filename = 'prices__single_price.xml';
 
@@ -530,6 +532,8 @@ class ProcessOneCv2FileServiceTest extends TestCase
 
         $this->assertSame('86.18', $product->price);
         $this->assertSame('86,18 RUB за шт', $product->price_representation);
+        $this->assertNull($product->old_price);
+        $this->assertNull($product->old_price_representation);
     }
 
     public function test_prices_file_does_not_count_missing_product_as_updated(): void
