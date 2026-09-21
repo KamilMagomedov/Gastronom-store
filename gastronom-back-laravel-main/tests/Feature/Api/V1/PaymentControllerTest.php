@@ -12,6 +12,7 @@ use App\Models\Product;
 use App\Notifications\OrderCreatedNotification;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\Notification;
+use Illuminate\Support\Carbon;
 use Laravel\Sanctum\Sanctum;
 use Tests\TestCase;
 
@@ -424,5 +425,100 @@ class PaymentControllerTest extends TestCase
             'order_id' => $order->id,
             'gateway_transaction_id' => $paymentId,
         ]);
+    }
+
+    public function test_duplicate_tinkoff_confirmed_webhook_is_idempotent(): void
+    {
+        $customer = Customer::factory()->create();
+        $paymentMethod = PaymentMethod::factory()->sbp()->create();
+
+        $order = Order::factory()->create([
+            'customer_id' => $customer->id,
+            'payment_method_id' => $paymentMethod->id,
+            'payment_status' => 'pending',
+        ]);
+
+        $acquirer = $paymentMethod->acquirer()->firstOrFail();
+
+        $paymentId = 'duplicate-'.$order->id;
+
+        $payload = [
+            'TerminalKey' => $acquirer->config['terminal_key'],
+            'OrderId' => (string) $order->id,
+            'Success' => true,
+            'Status' => 'CONFIRMED',
+            'PaymentId' => $paymentId,
+            'ErrorCode' => '0',
+            'Amount' => (int) round(((float) $order->total_amount) * 100),
+        ];
+
+        $tokenData = $payload;
+        $tokenData['Password'] = $acquirer->config['secret_key'];
+
+        ksort($tokenData);
+
+        $payload['Token'] = hash(
+            'sha256',
+            implode('', array_map(
+                static fn ($value) => (string) $value,
+                $tokenData
+            ))
+        );
+
+        Carbon::setTestNow('2026-09-21 20:00:00');
+
+        try {
+            $firstResponse = $this->postJson(
+                route('api.payments.webhook', ['gateway' => 'tinkoff']),
+                $payload
+            );
+
+            $firstResponse->assertStatus(200);
+
+            $transaction = \App\Models\Transaction::where(
+                'gateway_transaction_id',
+                $paymentId
+            )->firstOrFail();
+
+            $order->refresh();
+
+            $firstProcessedAt = $transaction->processed_at;
+            $firstTransactionUpdatedAt = $transaction->updated_at;
+            $firstOrderUpdatedAt = $order->updated_at;
+
+            Carbon::setTestNow('2026-09-21 20:05:00');
+
+            $secondResponse = $this->postJson(
+                route('api.payments.webhook', ['gateway' => 'tinkoff']),
+                $payload
+            );
+
+            $secondResponse->assertStatus(200);
+            $this->assertSame('OK', $secondResponse->getContent());
+
+            $transaction->refresh();
+            $order->refresh();
+
+            $this->assertSame(1, \App\Models\Transaction::where(
+                'gateway_transaction_id',
+                $paymentId
+            )->count());
+
+            $this->assertTrue(
+                $transaction->processed_at->equalTo($firstProcessedAt)
+            );
+
+            $this->assertTrue(
+                $transaction->updated_at->equalTo($firstTransactionUpdatedAt)
+            );
+
+            $this->assertTrue(
+                $order->updated_at->equalTo($firstOrderUpdatedAt)
+            );
+
+            $this->assertSame('paid', $order->payment_status);
+        } finally {
+            Carbon::setTestNow();
+        }
     }
 }

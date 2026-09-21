@@ -127,6 +127,14 @@ class TinkoffGateway extends BaseAcquirerGateway implements PaymentGateway
             ->where('gateway_transaction_id', (string) $paymentId)
             ->first();
 
+        if (
+            $transaction
+            && $transaction->isCompleted()
+            && ($payload['Status'] ?? '') === 'CONFIRMED'
+        ) {
+            return $transaction;
+        }
+
         if (! $transaction) {
             $transaction = $order->transactions()->create([
                 'customer_id' => $order->customer_id,
