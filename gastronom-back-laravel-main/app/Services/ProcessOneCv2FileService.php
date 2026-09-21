@@ -717,6 +717,7 @@ class ProcessOneCv2FileService
     private function failImport(SyncLog $syncLog, string $errorMessage): void
     {
         $syncLog->update([
+            'status' => 'error',
             'message' => "Import failed: {$errorMessage}",
             'data' => array_merge($syncLog->data ?? [], [
                 'import_status' => 'failed',

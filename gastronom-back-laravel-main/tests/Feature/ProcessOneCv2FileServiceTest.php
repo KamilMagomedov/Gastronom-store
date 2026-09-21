@@ -571,4 +571,48 @@ class ProcessOneCv2FileServiceTest extends TestCase
         $this->assertSame(1, $syncLog->data['prices_processed']);
         $this->assertSame(0, $syncLog->data['prices_updated']);
     }
+
+    public function test_failed_import_marks_sync_log_as_error(): void
+    {
+        $filename = 'unknown__broken.xml';
+
+        Storage::disk('local')->put(
+            "onec_v2/{$filename}",
+            '<?xml version="1.0" encoding="UTF-8"?><КоммерческаяИнформация />'
+        );
+
+        try {
+            $this->service->processFile($filename);
+
+            $this->fail('Expected import exception was not thrown');
+        } catch (\Exception $e) {
+            $this->assertStringContainsString('Unknown file type', $e->getMessage());
+        }
+
+        $syncLog = \App\Models\SyncLog::where('source', '1C')
+            ->latest('id')
+            ->firstOrFail();
+
+        $this->assertSame('error', $syncLog->status);
+        $this->assertSame('failed', $syncLog->data['import_status']);
+    }
+
+    public function test_successful_import_marks_sync_log_as_completed(): void
+    {
+        $filename = 'import__successful_status.xml';
+
+        Storage::disk('local')->put(
+            "onec_v2/{$filename}",
+            '<?xml version="1.0" encoding="UTF-8"?><КоммерческаяИнформация />'
+        );
+
+        $this->service->processFile($filename);
+
+        $syncLog = \App\Models\SyncLog::where('source', '1C')
+            ->latest('id')
+            ->firstOrFail();
+
+        $this->assertSame('success', $syncLog->status);
+        $this->assertSame('completed', $syncLog->data['import_status']);
+    }
 }
