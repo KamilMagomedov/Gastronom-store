@@ -98,6 +98,18 @@ class TinkoffGateway extends BaseAcquirerGateway implements PaymentGateway
 
         $order = Order::findOrFail($orderId);
 
+        $amount = $payload['Amount'] ?? null;
+
+        if (! is_numeric($amount)) {
+            throw new \RuntimeException('Amount missing in Tinkoff webhook');
+        }
+
+        $expectedAmount = (int) round(((float) $order->total_amount) * 100);
+
+        if ((int) $amount !== $expectedAmount) {
+            throw new \RuntimeException('Tinkoff webhook amount mismatch');
+        }
+
         $transaction = Transaction::query()
             ->where('order_id', $order->id)
             ->where('gateway_transaction_id', (string) $paymentId)
