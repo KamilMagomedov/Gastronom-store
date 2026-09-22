@@ -10,10 +10,12 @@ use App\Models\Order;
 use App\Models\PaymentMethod;
 use App\Models\Product;
 use App\Notifications\OrderCreatedNotification;
+use App\Services\Payment\PaymentManager;
 use Illuminate\Foundation\Testing\RefreshDatabase;
-use Illuminate\Support\Facades\Notification;
 use Illuminate\Support\Carbon;
+use Illuminate\Support\Facades\Notification;
 use Laravel\Sanctum\Sanctum;
+use Mockery;
 use Tests\TestCase;
 
 class PaymentControllerTest extends TestCase
@@ -1085,5 +1087,71 @@ class PaymentControllerTest extends TestCase
         } finally {
             Carbon::setTestNow();
         }
+    }
+
+    public function test_initiate_hides_internal_payment_provider_errors(): void
+    {
+        $customer = Customer::factory()->create();
+
+        Sanctum::actingAs($customer, guard: 'customers');
+
+        $paymentMethod = PaymentMethod::factory()->sbp()->create();
+
+        $order = Order::factory()->create([
+            'customer_id' => $customer->id,
+            'payment_method_id' => $paymentMethod->id,
+            'payment_status' => 'pending',
+        ]);
+
+        $paymentManagerMock = Mockery::mock(PaymentManager::class);
+
+        $paymentManagerMock
+            ->shouldReceive('initiateOnlinePayment')
+            ->once()
+            ->with(
+                Mockery::on(
+                    static fn (Order $passedOrder): bool =>
+                        $passedOrder->id === $order->id
+                ),
+                null
+            )
+            ->andThrow(new \RuntimeException(
+                'SQLSTATE[23000]: UNIQUE constraint failed: '
+                .'transactions.gateway_transaction_id'
+            ));
+
+        $this->app->instance(
+            PaymentManager::class,
+            $paymentManagerMock
+        );
+
+        $response = $this->postJson(
+            route('api.v1.payments.initiate', $order)
+        );
+
+        $response
+            ->assertStatus(502)
+            ->assertJsonPath(
+                'message',
+                'Payment service is temporarily unavailable'
+            )
+            ->assertJsonPath('success', false);
+
+        $body = $response->getContent();
+
+        $this->assertStringNotContainsString(
+            'SQLSTATE',
+            $body
+        );
+
+        $this->assertStringNotContainsString(
+            'transactions',
+            $body
+        );
+
+        $this->assertStringNotContainsString(
+            'gateway_transaction_id',
+            $body
+        );
     }
 }

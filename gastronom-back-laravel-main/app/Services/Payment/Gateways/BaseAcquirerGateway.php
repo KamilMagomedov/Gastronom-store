@@ -7,6 +7,7 @@ use App\Enums\TransactionStatus;
 use App\Models\Order;
 use App\Models\Transaction;
 use App\Services\Payment\Contracts\PaymentGateway;
+use Illuminate\Database\UniqueConstraintViolationException;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Str;
@@ -58,16 +59,33 @@ abstract class BaseAcquirerGateway implements PaymentGateway
         $data = $response['body'];
         $result = $this->parseCreatePaymentResponse($data, $order);
 
-        $transaction = $order->transactions()->create([
-            'customer_id' => $order->customer_id,
-            'amount' => $order->total_amount,
-            'currency' => 'RUB',
-            'payment_method' => 'card',
-            'gateway' => $this->getGatewayName(),
-            'gateway_transaction_id' => $result['gateway_transaction_id'] ?? $data['id'] ?? null,
-            'status' => \App\Enums\TransactionStatus::PENDING,
-            'gateway_response' => $data,
-        ]);
+        $gatewayTransactionId = $result['gateway_transaction_id']
+        ?? $data['id']
+        ?? null;
+
+        try {
+            $transaction = Transaction::query()->createOrFirst(
+                [
+                    'order_id' => $order->id,
+                    'customer_id' => $order->customer_id,
+                    'gateway' => $this->getGatewayName(),
+                    'gateway_transaction_id' => $gatewayTransactionId,
+                ],
+                [
+                    'amount' => $order->total_amount,
+                    'currency' => 'RUB',
+                    'payment_method' => 'card',
+                    'status' => TransactionStatus::PENDING,
+                    'gateway_response' => $data,
+                ]
+            );
+        } catch (UniqueConstraintViolationException $e) {
+            throw new \RuntimeException(
+                'Payment transaction does not belong to this order',
+                0,
+                $e
+            );
+        }
 
         return [
             'payment_url' => $result['payment_url'] ?? null,
