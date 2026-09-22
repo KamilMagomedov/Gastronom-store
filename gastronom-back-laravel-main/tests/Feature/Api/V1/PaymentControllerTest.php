@@ -521,4 +521,184 @@ class PaymentControllerTest extends TestCase
             Carbon::setTestNow();
         }
     }
+
+    public function test_tinkoff_rejected_webhook_does_not_downgrade_completed_payment(): void
+    {
+        $customer = Customer::factory()->create();
+        $paymentMethod = PaymentMethod::factory()->sbp()->create();
+
+        $order = Order::factory()->create([
+            'customer_id' => $customer->id,
+            'payment_method_id' => $paymentMethod->id,
+            'payment_status' => 'pending',
+        ]);
+
+        $acquirer = $paymentMethod->acquirer()->firstOrFail();
+
+        $paymentId = 'terminal-state-'.$order->id;
+
+        $confirmedPayload = [
+            'TerminalKey' => $acquirer->config['terminal_key'],
+            'OrderId' => (string) $order->id,
+            'Success' => true,
+            'Status' => 'CONFIRMED',
+            'PaymentId' => $paymentId,
+            'ErrorCode' => '0',
+            'Amount' => (int) round(((float) $order->total_amount) * 100),
+        ];
+
+        $tokenData = $confirmedPayload;
+        $tokenData['Password'] = $acquirer->config['secret_key'];
+
+        ksort($tokenData);
+
+        $confirmedPayload['Token'] = hash(
+            'sha256',
+            implode('', array_map(
+                static fn ($value) => (string) $value,
+                $tokenData
+            ))
+        );
+
+        $firstResponse = $this->postJson(
+            route('api.payments.webhook', ['gateway' => 'tinkoff']),
+            $confirmedPayload
+        );
+
+        $firstResponse->assertStatus(200);
+
+        $rejectedPayload = [
+            'TerminalKey' => $acquirer->config['terminal_key'],
+            'OrderId' => (string) $order->id,
+            'Success' => false,
+            'Status' => 'REJECTED',
+            'PaymentId' => $paymentId,
+            'ErrorCode' => '1',
+            'Amount' => (int) round(((float) $order->total_amount) * 100),
+        ];
+
+        $tokenData = $rejectedPayload;
+        $tokenData['Password'] = $acquirer->config['secret_key'];
+
+        ksort($tokenData);
+
+        $rejectedPayload['Token'] = hash(
+            'sha256',
+            implode('', array_map(
+                static fn ($value) => (string) $value,
+                $tokenData
+            ))
+        );
+
+        $secondResponse = $this->postJson(
+            route('api.payments.webhook', ['gateway' => 'tinkoff']),
+            $rejectedPayload
+        );
+
+        $secondResponse->assertStatus(200);
+
+        $this->assertDatabaseHas('transactions', [
+            'order_id' => $order->id,
+            'gateway_transaction_id' => $paymentId,
+            'status' => 'completed',
+        ]);
+
+        $this->assertDatabaseHas('orders', [
+            'id' => $order->id,
+            'payment_status' => 'paid',
+        ]);
+    }
+
+    public function test_tinkoff_reversed_and_canceled_webhooks_do_not_downgrade_completed_payment(): void
+    {
+        $customer = Customer::factory()->create();
+        $paymentMethod = PaymentMethod::factory()->sbp()->create();
+        $acquirer = $paymentMethod->acquirer()->firstOrFail();
+
+        $signPayload = function (array $payload) use ($acquirer): array {
+            $tokenData = $payload;
+            $tokenData['Password'] = $acquirer->config['secret_key'];
+
+            ksort($tokenData);
+
+            $payload['Token'] = hash(
+                'sha256',
+                implode('', array_map(
+                    static fn ($value) => (string) $value,
+                    $tokenData
+                ))
+            );
+
+            return $payload;
+        };
+
+        foreach (['REVERSED', 'CANCELED'] as $terminalStatus) {
+            $order = Order::factory()->create([
+                'customer_id' => $customer->id,
+                'payment_method_id' => $paymentMethod->id,
+                'payment_status' => 'pending',
+            ]);
+
+            $paymentId = strtolower($terminalStatus).'-'.$order->id;
+
+            $amount = (int) round(
+                ((float) $order->total_amount) * 100
+            );
+
+            $confirmedPayload = $signPayload([
+                'TerminalKey' => $acquirer->config['terminal_key'],
+                'OrderId' => (string) $order->id,
+                'Success' => true,
+                'Status' => 'CONFIRMED',
+                'PaymentId' => $paymentId,
+                'ErrorCode' => '0',
+                'Amount' => $amount,
+            ]);
+
+            $confirmedResponse = $this->postJson(
+                route('api.payments.webhook', ['gateway' => 'tinkoff']),
+                $confirmedPayload
+            );
+
+            $confirmedResponse->assertStatus(200);
+            $this->assertSame('OK', $confirmedResponse->getContent());
+
+            $terminalPayload = $signPayload([
+                'TerminalKey' => $acquirer->config['terminal_key'],
+                'OrderId' => (string) $order->id,
+                'Success' => false,
+                'Status' => $terminalStatus,
+                'PaymentId' => $paymentId,
+                'ErrorCode' => '1',
+                'Amount' => $amount,
+            ]);
+
+            $terminalResponse = $this->postJson(
+                route('api.payments.webhook', ['gateway' => 'tinkoff']),
+                $terminalPayload
+            );
+
+            $terminalResponse->assertStatus(200);
+            $this->assertSame('OK', $terminalResponse->getContent());
+
+            $this->assertDatabaseHas('transactions', [
+                'order_id' => $order->id,
+                'gateway_transaction_id' => $paymentId,
+                'status' => 'completed',
+            ]);
+
+            $this->assertSame(
+                1,
+                \App\Models\Transaction::where(
+                    'gateway_transaction_id',
+                    $paymentId
+                )->count()
+            );
+
+            $this->assertDatabaseHas('orders', [
+                'id' => $order->id,
+                'payment_status' => 'paid',
+            ]);
+        }
+    }
 }
