@@ -2,9 +2,12 @@
 
 namespace App\Services\Payment\Gateways;
 
+use App\Enums\PaymentStatus;
+use App\Enums\TransactionStatus;
 use App\Models\Order;
 use App\Models\Transaction;
 use App\Services\Payment\Contracts\PaymentGateway;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Str;
 
@@ -123,31 +126,57 @@ abstract class BaseAcquirerGateway implements PaymentGateway
 
     protected function markAsCompleted(Transaction $transaction): Transaction
     {
-        $transaction->update([
-            'status' => \App\Enums\TransactionStatus::COMPLETED,
-            'processed_at' => now(),
-        ]);
+        return DB::transaction(function () use ($transaction): Transaction {
+            $updated = Transaction::query()
+                ->whereKey($transaction->getKey())
+                ->whereIn('status', [
+                    TransactionStatus::PENDING->value,
+                    TransactionStatus::PROCESSING->value,
+                ])
+                ->update([
+                    'status' => TransactionStatus::COMPLETED->value,
+                    'processed_at' => now(),
+                ]);
 
-        $transaction->order->update([
-            'payment_status' => \App\Enums\PaymentStatus::PAID->value,
-        ]);
+            if ($updated === 0) {
+                return $transaction->refresh();
+            }
 
-        return $transaction;
+            $transaction->order->update([
+                'payment_status' => PaymentStatus::PAID->value,
+            ]);
+
+            return $transaction->refresh();
+        });
     }
 
-    protected function markAsFailed(Transaction $transaction, string $reason = 'Payment failed'): Transaction
-    {
-        $transaction->update([
-            'status' => \App\Enums\TransactionStatus::FAILED,
-            'processed_at' => now(),
-            'notes' => $reason,
-        ]);
+    protected function markAsFailed(
+        Transaction $transaction,
+        string $reason = 'Payment failed'
+    ): Transaction {
+        return DB::transaction(function () use ($transaction, $reason): Transaction {
+            $updated = Transaction::query()
+                ->whereKey($transaction->getKey())
+                ->whereIn('status', [
+                    TransactionStatus::PENDING->value,
+                    TransactionStatus::PROCESSING->value,
+                ])
+                ->update([
+                    'status' => TransactionStatus::FAILED->value,
+                    'processed_at' => now(),
+                    'notes' => $reason,
+                ]);
 
-        $transaction->order->update([
-            'payment_status' => \App\Enums\PaymentStatus::FAILED->value,
-        ]);
+            if ($updated === 0) {
+                return $transaction->refresh();
+            }
 
-        return $transaction;
+            $transaction->order->update([
+                'payment_status' => PaymentStatus::FAILED->value,
+            ]);
+
+            return $transaction->refresh();
+        });
     }
 
     protected function sendRequest(string $method, string $url, array $data = [], ?string $idempotenceKey = null): array

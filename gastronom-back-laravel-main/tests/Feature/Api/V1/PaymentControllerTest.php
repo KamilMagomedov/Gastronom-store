@@ -701,4 +701,389 @@ class PaymentControllerTest extends TestCase
             ]);
         }
     }
+
+    public function test_tinkoff_webhook_recovers_from_concurrent_transaction_creation(): void
+    {
+        $customer = Customer::factory()->create();
+        $paymentMethod = PaymentMethod::factory()->sbp()->create();
+
+        $order = Order::factory()->create([
+            'customer_id' => $customer->id,
+            'payment_method_id' => $paymentMethod->id,
+            'payment_status' => 'pending',
+        ]);
+
+        $acquirer = $paymentMethod->acquirer()->firstOrFail();
+
+        $paymentId = 'concurrent-'.$order->id;
+
+        $payload = [
+            'TerminalKey' => $acquirer->config['terminal_key'],
+            'OrderId' => (string) $order->id,
+            'Success' => true,
+            'Status' => 'CONFIRMED',
+            'PaymentId' => $paymentId,
+            'ErrorCode' => '0',
+            'Amount' => (int) round(((float) $order->total_amount) * 100),
+        ];
+
+        $tokenData = $payload;
+        $tokenData['Password'] = $acquirer->config['secret_key'];
+
+        ksort($tokenData);
+
+        $payload['Token'] = hash(
+            'sha256',
+            implode('', array_map(
+                static fn ($value) => (string) $value,
+                $tokenData
+            ))
+        );
+
+        $concurrentTransactionCreated = false;
+
+        \Illuminate\Support\Facades\DB::listen(
+            function ($query) use (
+                &$concurrentTransactionCreated,
+                $paymentId,
+                $order
+            ): void {
+                if ($concurrentTransactionCreated) {
+                    return;
+                }
+
+                $sql = strtolower($query->sql);
+
+                $hasPaymentId = in_array(
+                    $paymentId,
+                    array_map(
+                        static fn ($value) => (string) $value,
+                        $query->bindings
+                    ),
+                    true
+                );
+
+                if (
+                    str_starts_with(ltrim($sql), 'select')
+                    && str_contains($sql, 'transactions')
+                    && $hasPaymentId
+                ) {
+                    $concurrentTransactionCreated = true;
+
+                    $order->transactions()->create([
+                        'customer_id' => $order->customer_id,
+                        'amount' => $order->total_amount,
+                        'currency' => 'RUB',
+                        'payment_method' => 'card',
+                        'gateway' => 'tinkoff',
+                        'gateway_transaction_id' => $paymentId,
+                        'status' => \App\Enums\TransactionStatus::PENDING,
+                        'gateway_response' => [
+                            'simulated_concurrent_request' => true,
+                        ],
+                    ]);
+                }
+            }
+        );
+
+        $response = $this->postJson(
+            route('api.payments.webhook', ['gateway' => 'tinkoff']),
+            $payload
+        );
+
+        $response->assertStatus(200);
+        $this->assertSame('OK', $response->getContent());
+
+        $this->assertTrue($concurrentTransactionCreated);
+
+        $this->assertSame(
+            1,
+            \App\Models\Transaction::where(
+                'gateway_transaction_id',
+                $paymentId
+            )->count()
+        );
+
+        $this->assertDatabaseHas('transactions', [
+            'order_id' => $order->id,
+            'gateway_transaction_id' => $paymentId,
+            'status' => 'completed',
+        ]);
+
+        $this->assertDatabaseHas('orders', [
+            'id' => $order->id,
+            'payment_status' => 'paid',
+        ]);
+    }
+
+    public function test_completed_transaction_is_only_processed_once_with_stale_concurrent_instances(): void
+    {
+        $customer = Customer::factory()->create();
+        $paymentMethod = PaymentMethod::factory()->sbp()->create();
+
+        $order = Order::factory()->create([
+            'customer_id' => $customer->id,
+            'payment_method_id' => $paymentMethod->id,
+            'payment_status' => 'pending',
+        ]);
+
+        $transaction = $order->transactions()->create([
+            'customer_id' => $customer->id,
+            'amount' => $order->total_amount,
+            'currency' => 'RUB',
+            'payment_method' => 'card',
+            'gateway' => 'tinkoff',
+            'gateway_transaction_id' => 'stale-concurrent-'.$order->id,
+            'status' => \App\Enums\TransactionStatus::PENDING,
+            'gateway_response' => [],
+        ]);
+
+        $firstInstance = \App\Models\Transaction::findOrFail($transaction->id);
+        $secondInstance = \App\Models\Transaction::findOrFail($transaction->id);
+
+        $gateway = new class extends \App\Services\Payment\Gateways\TinkoffGateway
+        {
+            public function complete(\App\Models\Transaction $transaction): \App\Models\Transaction
+            {
+                return $this->markAsCompleted($transaction);
+            }
+        };
+
+        Carbon::setTestNow('2026-09-22 09:00:00');
+
+        try {
+            $gateway->complete($firstInstance);
+
+            $transaction->refresh();
+            $order->refresh();
+
+            $firstProcessedAt = $transaction->processed_at;
+            $firstTransactionUpdatedAt = $transaction->updated_at;
+            $firstOrderUpdatedAt = $order->updated_at;
+
+            Carbon::setTestNow('2026-09-22 09:05:00');
+
+            $gateway->complete($secondInstance);
+
+            $transaction->refresh();
+            $order->refresh();
+
+            $this->assertTrue(
+                $transaction->processed_at->equalTo($firstProcessedAt)
+            );
+
+            $this->assertTrue(
+                $transaction->updated_at->equalTo($firstTransactionUpdatedAt)
+            );
+
+            $this->assertTrue(
+                $order->updated_at->equalTo($firstOrderUpdatedAt)
+            );
+
+            $this->assertSame(
+                \App\Enums\TransactionStatus::COMPLETED,
+                $transaction->status
+            );
+
+            $this->assertSame('paid', $order->payment_status);
+        } finally {
+            Carbon::setTestNow();
+        }
+    }
+
+    public function test_completed_transaction_cannot_be_failed_by_stale_concurrent_instance(): void
+    {
+        $customer = Customer::factory()->create();
+        $paymentMethod = PaymentMethod::factory()->sbp()->create();
+
+        $order = Order::factory()->create([
+            'customer_id' => $customer->id,
+            'payment_method_id' => $paymentMethod->id,
+            'payment_status' => 'pending',
+        ]);
+
+        $transaction = $order->transactions()->create([
+            'customer_id' => $customer->id,
+            'amount' => $order->total_amount,
+            'currency' => 'RUB',
+            'payment_method' => 'card',
+            'gateway' => 'tinkoff',
+            'gateway_transaction_id' => 'conflicting-concurrent-'.$order->id,
+            'status' => \App\Enums\TransactionStatus::PENDING,
+            'gateway_response' => [],
+        ]);
+
+        $completedInstance = \App\Models\Transaction::findOrFail(
+            $transaction->id
+        );
+
+        $staleFailedInstance = \App\Models\Transaction::findOrFail(
+            $transaction->id
+        );
+
+        $gateway = new class extends \App\Services\Payment\Gateways\TinkoffGateway
+        {
+            public function complete(
+                \App\Models\Transaction $transaction
+            ): \App\Models\Transaction {
+                return $this->markAsCompleted($transaction);
+            }
+
+            public function fail(
+                \App\Models\Transaction $transaction
+            ): \App\Models\Transaction {
+                return $this->markAsFailed(
+                    $transaction,
+                    'Concurrent payment failure'
+                );
+            }
+        };
+
+        Carbon::setTestNow('2026-09-22 10:00:00');
+
+        try {
+            $gateway->complete($completedInstance);
+
+            $transaction->refresh();
+            $order->refresh();
+
+            $firstProcessedAt = $transaction->processed_at;
+            $firstTransactionUpdatedAt = $transaction->updated_at;
+            $firstOrderUpdatedAt = $order->updated_at;
+            $firstNotes = $transaction->notes;
+
+            Carbon::setTestNow('2026-09-22 10:05:00');
+
+            $gateway->fail($staleFailedInstance);
+
+            $transaction->refresh();
+            $order->refresh();
+
+            $this->assertSame(
+                \App\Enums\TransactionStatus::COMPLETED,
+                $transaction->status
+            );
+
+            $this->assertSame('paid', $order->payment_status);
+
+            $this->assertTrue(
+                $transaction->processed_at->equalTo($firstProcessedAt)
+            );
+
+            $this->assertTrue(
+                $transaction->updated_at->equalTo(
+                    $firstTransactionUpdatedAt
+                )
+            );
+
+            $this->assertTrue(
+                $order->updated_at->equalTo($firstOrderUpdatedAt)
+            );
+
+            $this->assertSame(
+                $firstNotes,
+                $transaction->notes
+            );
+        } finally {
+            Carbon::setTestNow();
+        }
+    }
+
+    public function test_failed_transaction_cannot_be_completed_by_stale_concurrent_instance(): void
+    {
+        $customer = Customer::factory()->create();
+        $paymentMethod = PaymentMethod::factory()->sbp()->create();
+
+        $order = Order::factory()->create([
+            'customer_id' => $customer->id,
+            'payment_method_id' => $paymentMethod->id,
+            'payment_status' => 'pending',
+        ]);
+
+        $transaction = $order->transactions()->create([
+            'customer_id' => $customer->id,
+            'amount' => $order->total_amount,
+            'currency' => 'RUB',
+            'payment_method' => 'card',
+            'gateway' => 'tinkoff',
+            'gateway_transaction_id' => 'failed-concurrent-'.$order->id,
+            'status' => \App\Enums\TransactionStatus::PENDING,
+            'gateway_response' => [],
+        ]);
+
+        $failedInstance = \App\Models\Transaction::findOrFail(
+            $transaction->id
+        );
+
+        $staleCompletedInstance = \App\Models\Transaction::findOrFail(
+            $transaction->id
+        );
+
+        $gateway = new class extends \App\Services\Payment\Gateways\TinkoffGateway
+        {
+            public function fail(
+                \App\Models\Transaction $transaction
+            ): \App\Models\Transaction {
+                return $this->markAsFailed(
+                    $transaction,
+                    'Concurrent payment failure'
+                );
+            }
+
+            public function complete(
+                \App\Models\Transaction $transaction
+            ): \App\Models\Transaction {
+                return $this->markAsCompleted($transaction);
+            }
+        };
+
+        Carbon::setTestNow('2026-09-22 10:00:00');
+
+        try {
+            $gateway->fail($failedInstance);
+
+            $transaction->refresh();
+            $order->refresh();
+
+            $firstProcessedAt = $transaction->processed_at;
+            $firstTransactionUpdatedAt = $transaction->updated_at;
+            $firstOrderUpdatedAt = $order->updated_at;
+            $firstNotes = $transaction->notes;
+
+            Carbon::setTestNow('2026-09-22 10:05:00');
+
+            $gateway->complete($staleCompletedInstance);
+
+            $transaction->refresh();
+            $order->refresh();
+
+            $this->assertSame(
+                \App\Enums\TransactionStatus::FAILED,
+                $transaction->status
+            );
+
+            $this->assertSame('failed', $order->payment_status);
+
+            $this->assertTrue(
+                $transaction->processed_at->equalTo($firstProcessedAt)
+            );
+
+            $this->assertTrue(
+                $transaction->updated_at->equalTo(
+                    $firstTransactionUpdatedAt
+                )
+            );
+
+            $this->assertTrue(
+                $order->updated_at->equalTo($firstOrderUpdatedAt)
+            );
+
+            $this->assertSame(
+                $firstNotes,
+                $transaction->notes
+            );
+        } finally {
+            Carbon::setTestNow();
+        }
+    }
 }

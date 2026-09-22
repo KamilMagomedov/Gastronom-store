@@ -142,18 +142,21 @@ class TinkoffGateway extends BaseAcquirerGateway implements PaymentGateway
         }
 
         if (! $transaction) {
-            $transaction = $order->transactions()->create([
-                'customer_id' => $order->customer_id,
-                'amount' => isset($payload['Amount'])
-                    ? ((int) $payload['Amount']) / 100
-                    : $order->total_amount,
-                'currency' => 'RUB',
-                'payment_method' => 'card',
-                'gateway' => $this->getGatewayName(),
-                'gateway_transaction_id' => (string) $paymentId,
-                'status' => \App\Enums\TransactionStatus::PENDING,
-                'gateway_response' => $payload,
-            ]);
+            $transaction = Transaction::query()->createOrFirst(
+                [
+                    'order_id' => $order->id,
+                    'customer_id' => $order->customer_id,
+                    'gateway' => $this->getGatewayName(),
+                    'gateway_transaction_id' => (string) $paymentId,
+                ],
+                [
+                    'amount' => ((int) $amount) / 100,
+                    'currency' => 'RUB',
+                    'payment_method' => 'card',
+                    'status' => \App\Enums\TransactionStatus::PENDING,
+                    'gateway_response' => $payload,
+                ]
+            );
         } else {
             $transaction->update([
                 'gateway_response' => $payload,
