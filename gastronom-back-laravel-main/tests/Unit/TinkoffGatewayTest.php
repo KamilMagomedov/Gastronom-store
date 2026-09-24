@@ -60,12 +60,29 @@ class TinkoffGatewayTest extends TestCase
         );
 
         Http::fake([
-            'https://securepay.tinkoff.ru/v2/Init' => function () use (
+            'https://securepay.tinkoff.ru/v2/Init' => function ($request) use (
                 $gateway,
                 $webhookPayload,
+                $config,
                 $paymentId,
                 $paymentUrl
             ) {
+                $webhookPayload['OrderId'] = (string) $request['OrderId'];
+
+                $tokenData = $webhookPayload;
+                unset($tokenData['Token']);
+
+                $tokenData['Password'] = $config['secret_key'];
+                ksort($tokenData);
+
+                $webhookPayload['Token'] = hash(
+                    'sha256',
+                    implode('', array_map(
+                        static fn ($value) => (string) $value,
+                        $tokenData
+                    ))
+                );
+
                 $gateway->handleWebhook($webhookPayload);
 
                 return Http::response([
@@ -199,6 +216,353 @@ class TinkoffGatewayTest extends TestCase
             Transaction::where('order_id', $targetOrder->id)
                 ->where('gateway_transaction_id', $paymentId)
                 ->count()
+        );
+    }
+
+    public function test_create_payment_does_not_start_second_payment_for_same_active_order(): void
+    {
+        $customer = Customer::factory()->create();
+
+        $order = Order::factory()->create([
+            'customer_id' => $customer->id,
+            'payment_status' => 'pending',
+        ]);
+
+        $config = [
+            'terminal_key' => 'tink_test_terminal',
+            'secret_key' => 'tink_test_secret',
+        ];
+
+        $gateway = new TinkoffGateway($config);
+
+        $firstPaymentId = 'first-payment-'.$order->id;
+        $secondPaymentId = 'second-payment-'.$order->id;
+
+        Http::fake([
+            'https://securepay.tinkoff.ru/v2/Init' => Http::sequence()
+                ->push([
+                    'Success' => true,
+                    'PaymentId' => $firstPaymentId,
+                    'PaymentURL' => 'https://example.test/payment/'.$firstPaymentId,
+                ], 200)
+                ->push([
+                    'Success' => true,
+                    'PaymentId' => $secondPaymentId,
+                    'PaymentURL' => 'https://example.test/payment/'.$secondPaymentId,
+                ], 200),
+        ]);
+
+        $firstResult = $gateway->createPayment($order);
+        $secondResult = $gateway->createPayment($order);
+
+        Http::assertSentCount(1);
+
+        $this->assertSame(
+            $firstResult['transaction_id'],
+            $secondResult['transaction_id']
+        );
+
+        $this->assertSame(
+            $firstResult['gateway_transaction_id'],
+            $secondResult['gateway_transaction_id']
+        );
+
+        $this->assertSame(
+            $firstResult['payment_url'],
+            $secondResult['payment_url']
+        );
+
+        $this->assertSame(
+            1,
+            Transaction::where('order_id', $order->id)
+                ->where('gateway', 'tinkoff')
+                ->whereIn('status', [
+                    TransactionStatus::PENDING->value,
+                    TransactionStatus::PROCESSING->value,
+                ])
+                ->count()
+        );
+    }
+
+    public function test_concurrent_payment_initialization_does_not_send_second_init_request(): void
+    {
+        $customer = Customer::factory()->create();
+
+        $order = Order::factory()->create([
+            'customer_id' => $customer->id,
+            'payment_status' => 'pending',
+        ]);
+
+        $config = [
+            'terminal_key' => 'tink_test_terminal',
+            'secret_key' => 'tink_test_secret',
+        ];
+
+        $gateway = new TinkoffGateway($config);
+
+        $requestCount = 0;
+        $secondAttemptException = null;
+
+        $paymentId = 'concurrent-payment-'.$order->id;
+        $paymentUrl = 'https://example.test/payment/'.$paymentId;
+
+        Http::fake([
+            'https://securepay.tinkoff.ru/v2/Init' => function () use (
+                &$requestCount,
+                &$secondAttemptException,
+                $gateway,
+                $order,
+                $paymentId,
+                $paymentUrl
+            ) {
+                $requestCount++;
+
+                if ($requestCount === 1) {
+                    try {
+                        $gateway->createPayment($order);
+                    } catch (\Throwable $exception) {
+                        $secondAttemptException = $exception;
+                    }
+                }
+
+                return Http::response([
+                    'Success' => true,
+                    'PaymentId' => $paymentId.'-'.$requestCount,
+                    'PaymentURL' => $paymentUrl.'-'.$requestCount,
+                ], 200);
+            },
+        ]);
+
+        $gateway->createPayment($order);
+
+        $this->assertSame(
+            1,
+            $requestCount,
+            'Concurrent payment initialization sent more than one /Init request.'
+        );
+
+        $this->assertNotNull(
+            $secondAttemptException,
+            'Concurrent payment initialization should not start another provider request.'
+        );
+    }
+
+    public function test_transaction_can_store_unique_gateway_order_id(): void
+    {
+        $customer = Customer::factory()->create();
+
+        $order = Order::factory()->create([
+            'customer_id' => $customer->id,
+        ]);
+
+        $gatewayOrderId = 'attempt-'.$order->id.'-test';
+
+        $transaction = Transaction::factory()->create([
+            'order_id' => $order->id,
+            'customer_id' => $customer->id,
+            'gateway' => 'tinkoff',
+            'gateway_order_id' => $gatewayOrderId,
+            'status' => TransactionStatus::PROCESSING,
+        ]);
+
+        $this->assertSame(
+            $gatewayOrderId,
+            $transaction->gateway_order_id
+        );
+
+        $this->expectException(
+            \Illuminate\Database\QueryException::class
+        );
+
+        Transaction::factory()->create([
+            'order_id' => $order->id,
+            'customer_id' => $customer->id,
+            'gateway' => 'tinkoff',
+            'gateway_order_id' => $gatewayOrderId,
+            'status' => TransactionStatus::PROCESSING,
+        ]);
+    }
+
+    public function test_webhook_resolves_processing_transaction_by_gateway_order_id(): void
+    {
+        $customer = Customer::factory()->create();
+
+        $order = Order::factory()->create([
+            'customer_id' => $customer->id,
+            'payment_status' => 'pending',
+        ]);
+
+        $config = [
+            'terminal_key' => 'tink_test_terminal',
+            'secret_key' => 'tink_test_secret',
+        ];
+
+        $gateway = new TinkoffGateway($config);
+
+        $gatewayOrderId = 'attempt-'.$order->id.'-webhook';
+        $paymentId = 'webhook-payment-'.$order->id;
+
+        $transaction = Transaction::factory()->create([
+            'order_id' => $order->id,
+            'customer_id' => $customer->id,
+            'amount' => $order->total_amount,
+            'currency' => 'RUB',
+            'payment_method' => 'card',
+            'gateway' => 'tinkoff',
+            'gateway_order_id' => $gatewayOrderId,
+            'gateway_transaction_id' => null,
+            'status' => TransactionStatus::PROCESSING,
+            'gateway_response' => null,
+            'processed_at' => null,
+        ]);
+
+        $payload = [
+            'TerminalKey' => $config['terminal_key'],
+            'OrderId' => $gatewayOrderId,
+            'Success' => true,
+            'Status' => 'CONFIRMED',
+            'PaymentId' => $paymentId,
+            'ErrorCode' => '0',
+            'Amount' => (int) round(
+                ((float) $order->total_amount) * 100
+            ),
+        ];
+
+        $tokenData = $payload;
+        $tokenData['Password'] = $config['secret_key'];
+        ksort($tokenData);
+
+        $payload['Token'] = hash(
+            'sha256',
+            implode('', array_map(
+                static fn ($value) => (string) $value,
+                $tokenData
+            ))
+        );
+
+        $result = $gateway->handleWebhook($payload);
+
+        $transaction->refresh();
+        $order->refresh();
+
+        $this->assertSame(
+            $transaction->id,
+            $result->id
+        );
+
+        $this->assertSame(
+            $paymentId,
+            $transaction->gateway_transaction_id
+        );
+
+        $this->assertSame(
+            TransactionStatus::COMPLETED,
+            $transaction->status
+        );
+
+        $this->assertSame(
+            'paid',
+            $order->payment_status
+        );
+
+        $this->assertSame(
+            1,
+            Transaction::where('order_id', $order->id)->count()
+        );
+    }
+
+    public function test_webhook_rejects_different_payment_id_for_existing_gateway_order_id(): void
+    {
+        $customer = Customer::factory()->create();
+
+        $order = Order::factory()->create([
+            'customer_id' => $customer->id,
+            'payment_status' => 'pending',
+        ]);
+
+        $config = [
+            'terminal_key' => 'tink_test_terminal',
+            'secret_key' => 'tink_test_secret',
+        ];
+
+        $gateway = new TinkoffGateway($config);
+
+        $gatewayOrderId = 'attempt-'.$order->id.'-mismatch';
+        $existingPaymentId = 'existing-payment-'.$order->id;
+        $differentPaymentId = 'different-payment-'.$order->id;
+
+        $transaction = Transaction::factory()->create([
+            'order_id' => $order->id,
+            'customer_id' => $customer->id,
+            'amount' => $order->total_amount,
+            'currency' => 'RUB',
+            'payment_method' => 'card',
+            'gateway' => 'tinkoff',
+            'gateway_order_id' => $gatewayOrderId,
+            'gateway_transaction_id' => $existingPaymentId,
+            'status' => TransactionStatus::PROCESSING,
+            'gateway_response' => null,
+            'processed_at' => null,
+        ]);
+
+        $payload = [
+            'TerminalKey' => $config['terminal_key'],
+            'OrderId' => $gatewayOrderId,
+            'Success' => true,
+            'Status' => 'CONFIRMED',
+            'PaymentId' => $differentPaymentId,
+            'ErrorCode' => '0',
+            'Amount' => (int) round(
+                ((float) $order->total_amount) * 100
+            ),
+        ];
+
+        $tokenData = $payload;
+        $tokenData['Password'] = $config['secret_key'];
+        ksort($tokenData);
+
+        $payload['Token'] = hash(
+            'sha256',
+            implode('', array_map(
+                static fn ($value) => (string) $value,
+                $tokenData
+            ))
+        );
+
+        try {
+            $gateway->handleWebhook($payload);
+
+            $this->fail(
+                'Expected webhook with mismatched PaymentId to be rejected.'
+            );
+        } catch (\RuntimeException $exception) {
+            $this->assertSame(
+                'Tinkoff webhook payment id mismatch',
+                $exception->getMessage()
+            );
+        }
+
+        $transaction->refresh();
+        $order->refresh();
+
+        $this->assertSame(
+            $existingPaymentId,
+            $transaction->gateway_transaction_id
+        );
+
+        $this->assertSame(
+            TransactionStatus::PROCESSING,
+            $transaction->status
+        );
+
+        $this->assertSame(
+            'pending',
+            $order->payment_status
+        );
+
+        $this->assertSame(
+            1,
+            Transaction::where('gateway_order_id', $gatewayOrderId)->count()
         );
     }
 }

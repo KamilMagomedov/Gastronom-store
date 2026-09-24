@@ -20,6 +20,7 @@ class Transaction extends Model
         'amount',
         'currency',
         'payment_method',
+        'gateway_order_id',
         'gateway_transaction_id',
         'gateway',
         'status',
