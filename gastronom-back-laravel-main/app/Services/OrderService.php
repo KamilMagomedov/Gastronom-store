@@ -13,6 +13,7 @@ use App\Models\DeliveryMethod;
 use App\Models\Order;
 use App\Models\OrderItem;
 use App\Models\PaymentMethod;
+use App\Models\Product;
 use App\Notifications\OrderCreatedNotification;
 use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\DB;
@@ -22,7 +23,9 @@ class OrderService
     public function createOrderFromCart(Cart $cart, CreateOrderData $data): Order
     {
         return DB::transaction(function () use ($cart, $data) {
-            $this->validateStock($cart->items);
+            $products = $this->lockProductsForCartItems($cart->items);
+
+            $this->validateStock($cart->items, $products);
 
             $order = Order::create([
                 'customer_id' => $cart->customer_id,
@@ -49,7 +52,7 @@ class OrderService
 
             $this->createOrderItems($order, $cart->items);
             $order->recalculateTotals();
-            $this->decrementStock($cart->items);
+            $this->decrementStock($cart->items, $products);
 
             $cart->items()->delete();
             $cart->update([
@@ -130,19 +133,43 @@ class OrderService
         return DeliveryMethod::find($deliveryMethodId)?->cost ?? 0.00;
     }
 
-    private function validateStock(Collection $cartItems): void
+    private function lockProductsForCartItems(Collection $cartItems): Collection
     {
+        $productIds = $cartItems
+            ->pluck('product_id')
+            ->unique()
+            ->sort()
+            ->values();
+
+        return Product::query()
+            ->whereIn('id', $productIds)
+            ->orderBy('id')
+            ->lockForUpdate()
+            ->get()
+            ->keyBy('id');
+    }
+
+    private function validateStock(
+        Collection $cartItems,
+        Collection $products
+    ): void {
         $insufficient = [];
 
         foreach ($cartItems as $cartItem) {
-            $product = $cartItem->product;
+            /** @var Product|null $product */
+            $product = $products->get($cartItem->product_id);
 
-            if ($product->isNotEnoughStockAvailable($cartItem->quantity)) {
+            if (
+                ! $product
+                || $product->isNotEnoughStockAvailable($cartItem->quantity)
+            ) {
                 $insufficient[] = [
-                    'product_id' => $product->id,
-                    'product_name' => $product->name,
+                    'product_id' => $cartItem->product_id,
+                    'product_name' => $product?->name
+                        ?? $cartItem->product?->name
+                        ?? 'Unknown product',
                     'requested' => $cartItem->quantity,
-                    'available' => $product->stock_quantity,
+                    'available' => $product?->stock_quantity ?? 0,
                 ];
             }
         }
@@ -155,10 +182,18 @@ class OrderService
         }
     }
 
-    private function decrementStock(Collection $cartItems): void
-    {
+    private function decrementStock(
+        Collection $cartItems,
+        Collection $products
+    ): void {
         foreach ($cartItems as $cartItem) {
-            $cartItem->product->decrement('stock_quantity', $cartItem->quantity);
+            /** @var Product $product */
+            $product = $products->get($cartItem->product_id);
+
+            $product->decrement(
+                'stock_quantity',
+                $cartItem->quantity
+            );
         }
     }
 

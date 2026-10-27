@@ -2,7 +2,9 @@
 
 namespace Tests\Feature\Api\V1;
 
+use App\DTO\Order\CreateOrderData;
 use App\Enums\OrderStatus;
+use App\Exceptions\InsufficientStockException;
 use App\Models\Cart;
 use App\Models\CartItem;
 use App\Models\Customer;
@@ -10,6 +12,7 @@ use App\Models\DeliveryMethod;
 use App\Models\Order;
 use App\Models\PaymentMethod;
 use App\Models\Product;
+use App\Services\OrderService;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Laravel\Sanctum\Sanctum;
 use Tests\TestCase;
@@ -375,6 +378,97 @@ class OrderControllerTest extends TestCase
             'id' => $product->id,
             'stock_quantity' => 7, // 10 - 3
         ]);
+    }
+
+    public function test_stale_cart_cannot_sell_last_product_twice(): void
+    {
+        $customer = Customer::factory()->create();
+
+        $deliveryMethod = DeliveryMethod::factory()->create();
+        $paymentMethod = PaymentMethod::factory()->create();
+
+        $product = Product::factory()->create([
+            'stock_quantity' => 1,
+            'in_stock' => true,
+            'price' => 100.00,
+        ]);
+
+        $firstCart = Cart::factory()->forCustomer($customer)->create([
+            'total_items' => 1,
+            'total_amount' => 100.00,
+        ]);
+
+        CartItem::factory()->create([
+            'cart_id' => $firstCart->id,
+            'product_id' => $product->id,
+            'quantity' => 1,
+            'price' => 100.00,
+            'total' => 100.00,
+        ]);
+
+        $secondCart = Cart::factory()->forCustomer($customer)->create([
+            'total_items' => 1,
+            'total_amount' => 100.00,
+        ]);
+
+        CartItem::factory()->create([
+            'cart_id' => $secondCart->id,
+            'product_id' => $product->id,
+            'quantity' => 1,
+            'price' => 100.00,
+            'total' => 100.00,
+        ]);
+
+        // Both carts load the product while stock is still 1.
+        $firstCart->load('items.product');
+        $secondCart->load('items.product');
+
+        $data = new CreateOrderData(
+            deliveryMethod: $deliveryMethod->id,
+            paymentMethod: $paymentMethod->id
+        );
+
+        /** @var OrderService $orderService */
+        $orderService = app(OrderService::class);
+
+        $orderService->createOrderFromCart(
+            $firstCart,
+            $data
+        );
+
+        $product->refresh();
+
+        $this->assertSame(
+            0,
+            $product->stock_quantity
+        );
+
+        try {
+            $orderService->createOrderFromCart(
+                $secondCart,
+                $data
+            );
+
+            $this->fail(
+                'Expected stale cart to be rejected after stock was consumed.'
+            );
+        } catch (InsufficientStockException) {
+            // Expected.
+        }
+
+        $product->refresh();
+
+        $this->assertSame(
+            0,
+            $product->stock_quantity,
+            'Stock must never become negative.'
+        );
+
+        $this->assertSame(
+            1,
+            Order::where('customer_id', $customer->id)->count(),
+            'Only one order should be created for the last available unit.'
+        );
     }
 
     public function test_store_requires_authentication(): void
