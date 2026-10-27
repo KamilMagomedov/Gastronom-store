@@ -8,6 +8,12 @@ use App\Models\Order;
 use App\Models\OrderItem;
 use App\Models\PaymentMethod;
 use App\Models\Product;
+use App\Exceptions\InvalidOrderStatusException;
+use App\Repositories\CartRepository;
+use App\Repositories\OrderRepository;
+use App\Services\OrderApiService;
+use App\Services\OrderService;
+use App\Services\Payment\PaymentManager;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Laravel\Sanctum\Sanctum;
 use Tests\TestCase;
@@ -60,7 +66,7 @@ class OrderRepeatControllerTest extends TestCase
             'customer_id' => $this->customer->id,
             'delivery_method_id' => $deliveryMethod->id,
             'payment_method_id' => $paymentMethod->id,
-            'status' => 'delivered',
+            'status' => 'completed',
             'total_amount' => 450.00,
             'subtotal' => 0,
         ]);
@@ -341,6 +347,89 @@ class OrderRepeatControllerTest extends TestCase
             'product_id' => $this->availableProduct->id,
             'quantity' => 3,
         ]);
+    }
+
+    public function test_repeat_order_rechecks_stock_after_initial_availability_check(): void
+    {
+        Sanctum::actingAs($this->customer, guard: 'customers');
+
+        $this->order->update([
+            'status' => 'cancelled',
+        ]);
+
+        $this->availableProduct->update([
+            'stock_quantity' => 3,
+            'is_active' => true,
+        ]);
+
+        $this->outOfStockProduct->update([
+            'stock_quantity' => 5,
+            'is_active' => true,
+        ]);
+
+        $this->inactiveProduct->update([
+            'stock_quantity' => 2,
+            'is_active' => true,
+        ]);
+
+        $service = new class(
+            app(OrderRepository::class),
+            app(OrderService::class),
+            app(CartRepository::class),
+            app(PaymentManager::class),
+            $this->availableProduct
+        ) extends OrderApiService {
+            public function __construct(
+                OrderRepository $orderRepository,
+                OrderService $orderService,
+                CartRepository $cartRepository,
+                PaymentManager $paymentManager,
+                private Product $productToConsume
+            ) {
+                parent::__construct(
+                    $orderRepository,
+                    $orderService,
+                    $cartRepository,
+                    $paymentManager
+                );
+            }
+
+            public function checkOrderForRepeat(int $orderId): array
+            {
+                $result = parent::checkOrderForRepeat($orderId);
+
+                // Simulate another order consuming the remaining stock
+                // after the availability check but before repeatOrder()
+                // enters its transaction.
+                $this->productToConsume->update([
+                    'stock_quantity' => 0,
+                ]);
+
+                return $result;
+            }
+        };
+
+        try {
+            $service->repeatOrder($this->order->id);
+
+            $this->fail(
+                'Expected repeat order to be rejected when stock changed after availability check.'
+            );
+        } catch (InvalidOrderStatusException $exception) {
+            $this->assertSame(422, $exception->getCode());
+        }
+
+        $this->assertSame(
+            0,
+            $this->availableProduct->fresh()->stock_quantity,
+            'Stock must never become negative.'
+        );
+
+        $this->assertSame(
+            1,
+            Order::where('customer_id', $this->customer->id)->count(),
+            'A repeated order must not be created when fresh stock is insufficient.'
+        );
     }
 
     /**

@@ -219,6 +219,38 @@ class OrderApiService
         }
 
         return DB::transaction(function () use ($originalOrder, $checkResult) {
+            $repeatItems = $checkResult['available_items'];
+
+            $productIds = $repeatItems
+                ->pluck('product_id')
+                ->unique()
+                ->sort()
+                ->values();
+
+            $products = Product::query()
+                ->whereIn('id', $productIds)
+                ->orderBy('id')
+                ->lockForUpdate()
+                ->get()
+                ->keyBy('id');
+
+            foreach ($repeatItems as $orderItem) {
+                /** @var Product|null $product */
+                $product = $products->get($orderItem->product_id);
+
+                if (
+                    ! $product
+                    || $product->getAvailabilityStatus(
+                        $orderItem->quantity
+                    ) !== 'available'
+                ) {
+                    throw new InvalidOrderStatusException(
+                        'Order cannot be repeated: some items are unavailable',
+                        422
+                    );
+                }
+            }
+
             $deliveryCost = DeliveryMethod::find(
                 $originalOrder->delivery_method_id
             )?->cost ?? 0.00;
@@ -279,8 +311,9 @@ class OrderApiService
                 'payment_status' => 'pending',
             ]);
 
-            foreach ($checkResult['available_items'] as $orderItem) {
-                $product = $orderItem->product;
+            foreach ($repeatItems as $orderItem) {
+                /** @var Product $product */
+                $product = $products->get($orderItem->product_id);
 
                 $this->orderRepository->createOrderItem(
                     $newOrder,
