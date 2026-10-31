@@ -343,6 +343,14 @@ class OrderApiService
                     'stock_quantity',
                     $orderItem->quantity
                 );
+
+                $product->refresh();
+
+                if ($product->stock_quantity <= 0 && $product->in_stock) {
+                    $product->update([
+                        'in_stock' => false,
+                    ]);
+                }
             }
 
             $newOrder->recalculateTotals();

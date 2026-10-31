@@ -349,6 +349,69 @@ class OrderRepeatControllerTest extends TestCase
         ]);
     }
 
+    public function test_repeat_order_marks_product_out_of_stock_when_last_units_are_sold(): void
+    {
+        Sanctum::actingAs($this->customer, guard: 'customers');
+
+        $this->availableProduct->update([
+            'stock_quantity' => 3,
+            'in_stock' => true,
+        ]);
+
+        $this->outOfStockProduct->update([
+            'stock_quantity' => 5,
+            'in_stock' => true,
+        ]);
+
+        $this->inactiveProduct->update([
+            'stock_quantity' => 2,
+            'in_stock' => true,
+            'is_active' => true,
+        ]);
+
+        $response = $this->postJson(
+            route(
+                'api.v1.orders-repeat.store',
+                [
+                    'order_id' => $this->order->id,
+                ]
+            )
+        );
+
+        $response->assertStatus(200);
+
+        $this->availableProduct->refresh();
+        $this->outOfStockProduct->refresh();
+        $this->inactiveProduct->refresh();
+
+        $this->assertSame(
+            0,
+            $this->availableProduct->stock_quantity
+        );
+
+        $this->assertSame(
+            0,
+            $this->outOfStockProduct->stock_quantity
+        );
+
+        $this->assertSame(
+            0,
+            $this->inactiveProduct->stock_quantity
+        );
+
+        $this->assertFalse(
+            $this->availableProduct->in_stock
+        );
+
+        $this->assertFalse(
+            $this->outOfStockProduct->in_stock
+        );
+
+        $this->assertFalse(
+            $this->inactiveProduct->in_stock
+        );
+    }
+
     public function test_repeat_order_rechecks_stock_after_initial_availability_check(): void
     {
         Sanctum::actingAs($this->customer, guard: 'customers');

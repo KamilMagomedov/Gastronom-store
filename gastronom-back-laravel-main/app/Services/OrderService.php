@@ -7,6 +7,7 @@ use App\Enums\OrderStatus;
 use App\Enums\PaymentStatus;
 use App\Exceptions\InsufficientStockException;
 use App\Exceptions\PriceChangedException;
+use App\Exceptions\InvalidOrderStatusException;
 use App\Http\Resources\Api\V1\DeliveryMethodResource;
 use App\Http\Resources\Api\V1\PaymentMethodResource;
 use App\Models\Cart;
@@ -121,16 +122,66 @@ class OrderService
     public function cancelOrder(Order $order, ?string $reason = null): Order
     {
         return DB::transaction(function () use ($order, $reason) {
-            $order->update([
-                'status' => OrderStatus::CANCELLED->value,
-                'notes' => ($order->notes ? $order->notes."\n" : '').'Отменен: '.($reason ?? 'Причина не указана'),
-            ]);
+            /** @var Order $lockedOrder */
+            $lockedOrder = Order::query()
+                ->whereKey($order->id)
+                ->lockForUpdate()
+                ->firstOrFail();
 
-            foreach ($order->orderItems as $item) {
-                $item?->product->increment('stock_quantity', $item->quantity);
+            if (! in_array($lockedOrder->status, [
+                OrderStatus::PENDING->value,
+                OrderStatus::CONFIRMED->value,
+                OrderStatus::PREPARING->value,
+            ], true)) {
+                throw new InvalidOrderStatusException(
+                    'Order cannot be cancelled at current status: '
+                    .$lockedOrder->getStatusLabel()
+                );
             }
 
-            return $order;
+            $orderItems = $lockedOrder
+                ->orderItems()
+                ->get();
+
+            $productIds = $orderItems
+                ->pluck('product_id')
+                ->filter()
+                ->unique()
+                ->sort()
+                ->values();
+
+            $products = Product::query()
+                ->whereIn('id', $productIds)
+                ->orderBy('id')
+                ->lockForUpdate()
+                ->get()
+                ->keyBy('id');
+
+            $lockedOrder->update([
+                'status' => OrderStatus::CANCELLED->value,
+                'notes' => ($lockedOrder->notes ? $lockedOrder->notes."\n" : '')
+                    .'Отменен: '.($reason ?? 'Причина не указана'),
+            ]);
+
+            foreach ($orderItems as $item) {
+                /** @var Product|null $product */
+                $product = $products->get($item->product_id);
+
+                if ($product) {
+                    $product->increment(
+                        'stock_quantity',
+                        $item->quantity
+                    );
+
+                    if (! $product->in_stock) {
+                        $product->update([
+                            'in_stock' => true,
+                        ]);
+                    }
+                }
+            }
+
+            return $lockedOrder;
         });
     }
 
@@ -288,6 +339,14 @@ class OrderService
                 'stock_quantity',
                 $cartItem->quantity
             );
+
+            $product->refresh();
+
+            if ($product->stock_quantity <= 0 && $product->in_stock) {
+                $product->update([
+                    'in_stock' => false,
+                ]);
+            }
         }
     }
 

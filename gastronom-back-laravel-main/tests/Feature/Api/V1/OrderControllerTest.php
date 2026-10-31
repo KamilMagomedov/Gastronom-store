@@ -10,6 +10,8 @@ use App\Models\CartItem;
 use App\Models\Customer;
 use App\Models\DeliveryMethod;
 use App\Models\Order;
+use App\Exceptions\InvalidOrderStatusException;
+use App\Models\OrderItem;
 use App\Models\PaymentMethod;
 use App\Models\Product;
 use App\Services\OrderService;
@@ -669,6 +671,74 @@ class OrderControllerTest extends TestCase
         ]);
     }
 
+    public function test_cancel_does_not_restore_stock_twice_from_stale_order_instances(): void
+    {
+        $customer = Customer::factory()->create();
+
+        $product = Product::factory()->create([
+            'stock_quantity' => 5,
+            'in_stock' => true,
+            'price' => 100.00,
+        ]);
+
+        $order = Order::factory()->create([
+            'customer_id' => $customer->id,
+            'status' => OrderStatus::PENDING->value,
+        ]);
+
+        OrderItem::factory()->create([
+            'order_id' => $order->id,
+            'product_id' => $product->id,
+            'product_name' => $product->name,
+            'product_sku' => $product->sku,
+            'quantity' => 2,
+            'unit_price' => 100.00,
+            'total_price' => 200.00,
+        ]);
+
+        // Simulate two requests that loaded the same pending order
+        // before either request completed the cancellation.
+        $firstRequestOrder = Order::query()->findOrFail($order->id);
+        $secondRequestOrder = Order::query()->findOrFail($order->id);
+
+        /** @var OrderService $orderService */
+        $orderService = app(OrderService::class);
+
+        $orderService->cancelOrder(
+            $firstRequestOrder,
+            'First cancellation'
+        );
+
+        $this->assertSame(
+            7,
+            $product->fresh()->stock_quantity
+        );
+
+        try {
+            $orderService->cancelOrder(
+                $secondRequestOrder,
+                'Second stale cancellation'
+            );
+
+            $this->fail(
+                'Expected stale second cancellation to be rejected.'
+            );
+        } catch (InvalidOrderStatusException) {
+            // Expected.
+        }
+
+        $this->assertSame(
+            7,
+            $product->fresh()->stock_quantity,
+            'Cancelled order stock must be restored only once.'
+        );
+
+        $this->assertSame(
+            OrderStatus::CANCELLED->value,
+            $order->fresh()->status
+        );
+    }
+
     public function test_cancel_validation_failure(): void
     {
         $customer = Customer::factory()->create();
@@ -826,6 +896,107 @@ class OrderControllerTest extends TestCase
         $this->assertEquals(
             2,
             $cart->total_items
+        );
+    }
+
+    public function test_cancel_marks_product_in_stock_when_stock_is_restored(): void
+    {
+        $customer = Customer::factory()->create();
+
+        $product = Product::factory()->create([
+            'stock_quantity' => 0,
+            'in_stock' => false,
+            'price' => 100.00,
+        ]);
+
+        $order = Order::factory()->create([
+            'customer_id' => $customer->id,
+            'status' => OrderStatus::PENDING->value,
+        ]);
+
+        OrderItem::factory()->create([
+            'order_id' => $order->id,
+            'product_id' => $product->id,
+            'product_name' => $product->name,
+            'product_sku' => $product->sku,
+            'quantity' => 2,
+            'unit_price' => 100.00,
+            'total_price' => 200.00,
+        ]);
+
+        /** @var OrderService $orderService */
+        $orderService = app(OrderService::class);
+
+        $orderService->cancelOrder(
+            $order,
+            'Restore product stock'
+        );
+
+        $product->refresh();
+
+        $this->assertSame(
+            2,
+            $product->stock_quantity
+        );
+
+        $this->assertTrue(
+            $product->in_stock,
+            'Product must become available when cancellation restores positive stock.'
+        );
+    }
+
+    public function test_store_marks_product_out_of_stock_when_last_unit_is_sold(): void
+    {
+        $customer = Customer::factory()->create();
+        Sanctum::actingAs($customer, guard: 'customers');
+
+        $deliveryMethod = DeliveryMethod::factory()->create();
+        $paymentMethod = PaymentMethod::factory()->create();
+
+        $product = Product::factory()->create([
+            'stock_quantity' => 1,
+            'in_stock' => true,
+            'price' => 100.00,
+        ]);
+
+        $cart = Cart::factory()->forCustomer($customer)->create([
+            'total_items' => 1,
+            'total_amount' => 100.00,
+        ]);
+
+        CartItem::factory()->create([
+            'cart_id' => $cart->id,
+            'product_id' => $product->id,
+            'quantity' => 1,
+            'price' => 100.00,
+            'total' => 100.00,
+        ]);
+
+        $orderData = [
+            'delivery_method' => $deliveryMethod->id,
+            'payment_method' => $paymentMethod->id,
+            'delivery_phone' => '+1234567890',
+            'delivery_street' => 'Test Street',
+            'delivery_city' => 'Test City',
+        ];
+
+        $response = $this->postJson(
+            $this->storeRoute,
+            $orderData
+        );
+
+        $response->assertStatus(200);
+
+        $product->refresh();
+
+        $this->assertSame(
+            0,
+            $product->stock_quantity
+        );
+
+        $this->assertFalse(
+            $product->in_stock,
+            'Product must be marked out of stock when the last unit is sold.'
         );
     }
 }
