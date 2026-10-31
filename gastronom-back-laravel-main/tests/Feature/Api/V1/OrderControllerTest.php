@@ -191,7 +191,10 @@ class OrderControllerTest extends TestCase
         $deliveryMethod = DeliveryMethod::factory()->create();
         $paymentMethod = PaymentMethod::factory()->create();
 
-        $product = Product::factory()->create(['stock_quantity' => 10]);
+        $product = Product::factory()->create([
+            'stock_quantity' => 10,
+            'price' => 50.00,
+        ]);
 
         $cart = Cart::factory()->create(['customer_id' => $customer->id]);
         CartItem::factory()->create([
@@ -351,7 +354,10 @@ class OrderControllerTest extends TestCase
 
         $deliveryMethod = DeliveryMethod::factory()->create();
         $paymentMethod = PaymentMethod::factory()->create();
-        $product = Product::factory()->create(['stock_quantity' => 10]);
+        $product = Product::factory()->create([
+            'stock_quantity' => 10,
+            'price' => 100.00,
+        ]);
 
         $cart = Cart::factory()->create(['customer_id' => $customer->id]);
         CartItem::factory()->create([
@@ -486,7 +492,10 @@ class OrderControllerTest extends TestCase
         $deliveryMethod = DeliveryMethod::factory()->create();
         $paymentMethod = PaymentMethod::factory()->cash()->create();
 
-        $product = Product::factory()->create(['stock_quantity' => 10]);
+        $product = Product::factory()->create([
+            'stock_quantity' => 10,
+            'price' => 100.00,
+        ]);
 
         $cart = Cart::factory()->create(['customer_id' => $customer->id]);
         CartItem::factory()->create([
@@ -725,5 +734,98 @@ class OrderControllerTest extends TestCase
         $response = $this->putJson(route('api.v1.orders.cancel', $order), []);
 
         $response->assertStatus(401);
+    }
+
+    public function test_store_rejects_checkout_when_product_price_changed(): void
+    {
+        $customer = Customer::factory()->create();
+        Sanctum::actingAs($customer, guard: 'customers');
+
+        $deliveryMethod = DeliveryMethod::factory()->create();
+        $paymentMethod = PaymentMethod::factory()->create();
+
+        $product = Product::factory()->create([
+            'stock_quantity' => 10,
+            'in_stock' => true,
+            'price' => 120.00,
+        ]);
+
+        $cart = Cart::factory()->forCustomer($customer)->create([
+            'total_items' => 2,
+            'total_amount' => 200.00,
+        ]);
+
+        $cartItem = CartItem::factory()->create([
+            'cart_id' => $cart->id,
+            'product_id' => $product->id,
+            'quantity' => 2,
+            'price' => 100.00,
+            'total' => 200.00,
+        ]);
+
+        $orderData = [
+            'delivery_method' => $deliveryMethod->id,
+            'payment_method' => $paymentMethod->id,
+            'delivery_phone' => '+1234567890',
+            'delivery_street' => 'Test Street',
+            'delivery_city' => 'Test City',
+        ];
+
+        $response = $this->postJson(
+            $this->storeRoute,
+            $orderData
+        );
+
+        $response->assertStatus(422)
+            ->assertJson([
+                'success' => false,
+                'message' => 'Цена товара изменилась',
+            ])
+            ->assertJsonStructure([
+                'data' => [
+                    'price_changed_items' => [
+                        '*' => [
+                            'product_id',
+                            'product_name',
+                            'old_price',
+                            'new_price',
+                            'quantity',
+                        ],
+                    ],
+                ],
+            ]);
+
+        $this->assertDatabaseMissing('orders', [
+            'customer_id' => $customer->id,
+        ]);
+
+        $this->assertSame(
+            10,
+            $product->fresh()->stock_quantity,
+            'Stock must not change when checkout price is stale.'
+        );
+
+        $cartItem->refresh();
+        $cart->refresh();
+
+        $this->assertEquals(
+            120.00,
+            (float) $cartItem->price
+        );
+
+        $this->assertEquals(
+            240.00,
+            (float) $cartItem->total
+        );
+
+        $this->assertEquals(
+            240.00,
+            (float) $cart->total_amount
+        );
+
+        $this->assertEquals(
+            2,
+            $cart->total_items
+        );
     }
 }

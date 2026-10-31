@@ -6,6 +6,7 @@ use App\Exceptions\Cart\CartNotFoundException;
 use App\Exceptions\EmptyCartException;
 use App\Exceptions\InsufficientStockException;
 use App\Exceptions\InvalidOrderStatusException;
+use App\Exceptions\PriceChangedException;
 use App\Http\Controllers\Controller;
 use App\Http\Requests\Api\OrderCancelRequest;
 use App\Http\Requests\Api\OrderRequest;
@@ -81,6 +82,14 @@ class OrderController extends Controller
             return ApiResponse::laravelError(
                 message: $e->getMessage(),
                 data: ['insufficient_items' => $e->getItems()],
+                statusCode: Response::HTTP_UNPROCESSABLE_ENTITY
+            );
+        } catch (PriceChangedException $e) {
+            return ApiResponse::laravelError(
+                message: $e->getMessage(),
+                data: [
+                    'price_changed_items' => $e->getItems(),
+                ],
                 statusCode: Response::HTTP_UNPROCESSABLE_ENTITY
             );
         } catch (\Throwable $e) {
