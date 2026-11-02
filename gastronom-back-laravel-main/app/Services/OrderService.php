@@ -103,13 +103,76 @@ class OrderService
 
     public function updateOrderStatus(Order $order, OrderStatus $status): Order
     {
-        $order->update(['status' => $status->value]);
+        return DB::transaction(function () use ($order, $status) {
+            /** @var Order $lockedOrder */
+            $lockedOrder = Order::query()
+                ->whereKey($order->id)
+                ->lockForUpdate()
+                ->firstOrFail();
 
-        if ($status === OrderStatus::COMPLETED) {
-            $order->update(['delivered_at' => now()]);
-        }
+            if ($lockedOrder->status === $status->value) {
+                return $lockedOrder;
+            }
 
-        return $order;
+            $currentStatus = OrderStatus::tryFrom(
+                $lockedOrder->status
+            );
+
+            if (! $currentStatus) {
+                throw new InvalidOrderStatusException(
+                    'Unknown current order status: '
+                    .$lockedOrder->status
+                );
+            }
+
+            $allowedTransitions = match ($currentStatus) {
+                OrderStatus::PENDING => [
+                    OrderStatus::CONFIRMED,
+                ],
+
+                OrderStatus::CONFIRMED => [
+                    OrderStatus::PREPARING,
+                ],
+
+                OrderStatus::PREPARING => [
+                    OrderStatus::READY,
+                ],
+
+                OrderStatus::READY => [
+                    OrderStatus::DELIVERING,
+                    OrderStatus::COMPLETED,
+                ],
+
+                OrderStatus::DELIVERING => [
+                    OrderStatus::COMPLETED,
+                ],
+
+                OrderStatus::COMPLETED,
+                OrderStatus::CANCELLED,
+                OrderStatus::REFUNDED => [],
+            };
+
+            if (! in_array($status, $allowedTransitions, true)) {
+                throw new InvalidOrderStatusException(
+                    'Invalid order status transition: '
+                    .$currentStatus->value
+                    .' -> '
+                    .$status->value
+                );
+            }
+
+            $lockedOrder->update([
+                'status' => $status->value,
+            ]);
+
+            if ($status === OrderStatus::COMPLETED) {
+                $lockedOrder->update([
+                    'delivered_at' => now(),
+                ]);
+            }
+
+            return $lockedOrder->fresh();
+        });
     }
 
     public function updatePaymentStatus(Order $order, PaymentStatus $status): Order

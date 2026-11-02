@@ -35,6 +35,7 @@ class OrderForm
                                     ->options(fn (): array => collect(\App\Enums\OrderStatus::cases())->mapWithKeys(fn ($case) => [$case->value => $case->getLabel()])->toArray())
                                     ->required()
                                     ->default(OrderStatus::PENDING->value)
+                                    ->disabledOn('edit')
                                     ->label('Статус заказа'),
 
                                 Select::make('payment_status')

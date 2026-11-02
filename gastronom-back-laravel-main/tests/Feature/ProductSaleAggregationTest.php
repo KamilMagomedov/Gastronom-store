@@ -93,7 +93,7 @@ class ProductSaleAggregationTest extends TestCase
         ]);
 
         $order = Order::factory()->create([
-            'status' => OrderStatus::PREPARING->value,
+            'status' => OrderStatus::READY->value,
         ]);
 
         OrderItem::factory()->create([

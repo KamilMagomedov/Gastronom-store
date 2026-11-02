@@ -11,6 +11,8 @@ use Filament\Actions\ViewAction;
 use Filament\Tables\Columns\TextColumn;
 use Filament\Tables\Filters\SelectFilter;
 use Filament\Tables\Table;
+use App\Enums\OrderStatus;
+use App\Services\OrderService;
 use Illuminate\Database\Eloquent\Model;
 
 class OrdersTable
@@ -118,15 +120,64 @@ class OrdersTable
                 ActionGroup::make([
                     ViewAction::make(),
                     EditAction::make(),
+                    Action::make('advance_status')
+                        ->label(
+                            fn (Model $record): string => match ($record->status) {
+                                OrderStatus::PENDING->value => 'Подтвердить заказ',
+                                OrderStatus::CONFIRMED->value => 'Начать приготовление',
+                                OrderStatus::PREPARING->value => 'Отметить готовым',
+                                OrderStatus::READY->value => 'Передать в доставку',
+                                default => 'Следующий статус',
+                            }
+                        )
+                        ->icon('heroicon-o-arrow-right-circle')
+                        ->color('primary')
+                        ->requiresConfirmation()
+                        ->action(function (Model $record) {
+                            $nextStatus = match ($record->status) {
+                                OrderStatus::PENDING->value => OrderStatus::CONFIRMED,
+                                OrderStatus::CONFIRMED->value => OrderStatus::PREPARING,
+                                OrderStatus::PREPARING->value => OrderStatus::READY,
+                                OrderStatus::READY->value => OrderStatus::DELIVERING,
+                                default => null,
+                            };
+
+                            if ($nextStatus !== null) {
+                                app(OrderService::class)->updateOrderStatus(
+                                    $record,
+                                    $nextStatus
+                                );
+                            }
+                        })
+                        ->visible(fn (Model $record): bool => in_array(
+                            $record->status,
+                            [
+                                OrderStatus::PENDING->value,
+                                OrderStatus::CONFIRMED->value,
+                                OrderStatus::PREPARING->value,
+                                OrderStatus::READY->value,
+                            ],
+                            true
+                        )),
                     Action::make('mark_as_completed')
                         ->label('Отметить выполненным')
                         ->icon('heroicon-o-check-circle')
                         ->color('success')
                         ->requiresConfirmation()
                         ->action(function (Model $record) {
-                            $record->update(['status' => \App\Enums\OrderStatus::COMPLETED->value]);
+                            app(OrderService::class)->updateOrderStatus(
+                                $record,
+                                OrderStatus::COMPLETED
+                            );
                         })
-                        ->visible(fn (Model $record): bool => $record->status !== \App\Enums\OrderStatus::COMPLETED->value),
+                        ->visible(fn (Model $record): bool => in_array(
+                            $record->status,
+                            [
+                                OrderStatus::READY->value,
+                                OrderStatus::DELIVERING->value,
+                            ],
+                            true
+                        )),
 
                     Action::make('mark_as_cancelled')
                         ->label('Отменить')
@@ -134,9 +185,20 @@ class OrdersTable
                         ->color('danger')
                         ->requiresConfirmation()
                         ->action(function (Model $record) {
-                            $record->update(['status' => \App\Enums\OrderStatus::CANCELLED->value]);
+                            app(OrderService::class)->cancelOrder(
+                                $record,
+                                'Отменен администратором через панель управления'
+                            );
                         })
-                        ->visible(fn (Model $record): bool => $record->status !== \App\Enums\OrderStatus::CANCELLED->value),
+                        ->visible(fn (Model $record): bool => in_array(
+                            $record->status,
+                            [
+                                OrderStatus::PENDING->value,
+                                OrderStatus::CONFIRMED->value,
+                                OrderStatus::PREPARING->value,
+                            ],
+                            true
+                        )),
                 ]),
             ])
             ->bulkActions([
