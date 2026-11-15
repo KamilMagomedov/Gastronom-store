@@ -5,6 +5,7 @@ namespace App\Services;
 use App\DTO\Order\CreateOrderData;
 use App\Enums\OrderStatus;
 use App\Enums\PaymentStatus;
+use App\Enums\TransactionStatus;
 use App\Exceptions\InsufficientStockException;
 use App\Exceptions\PriceChangedException;
 use App\Exceptions\InvalidOrderStatusException;
@@ -190,6 +191,32 @@ class OrderService
                 ->whereKey($order->id)
                 ->lockForUpdate()
                 ->firstOrFail();
+
+            if (in_array(
+                $lockedOrder->getRawOriginal('payment_status'),
+                [
+                    PaymentStatus::PAID->value,
+                    PaymentStatus::PARTIALLY_REFUNDED->value,
+                ],
+                true
+            )) {
+                throw new InvalidOrderStatusException(
+                    'Paid orders require a confirmed refund before cancellation.'
+                );
+            }
+
+            $hasActivePayment = $lockedOrder->transactions()
+                ->whereIn('status', [
+                    TransactionStatus::PENDING->value,
+                    TransactionStatus::PROCESSING->value,
+                ])
+                ->exists();
+
+            if ($hasActivePayment) {
+                throw new InvalidOrderStatusException(
+                    'Order cannot be cancelled while payment is in progress.'
+                );
+            }
 
             if (! in_array($lockedOrder->status, [
                 OrderStatus::PENDING->value,

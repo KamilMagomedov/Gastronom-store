@@ -42,6 +42,8 @@ class OrderForm
                                     ->options(fn (): array => collect(\App\Enums\PaymentStatus::cases())->mapWithKeys(fn ($case) => [$case->value => $case->getLabel()])->toArray())
                                     ->required()
                                     ->default(PaymentStatus::PENDING->value)
+                                    ->disabled()
+                                    ->dehydrated(false)
                                     ->label('Статус оплаты'),
 
                                 Select::make('payment_method_id')

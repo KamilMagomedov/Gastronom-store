@@ -4,12 +4,15 @@ namespace Tests\Feature\Api\V1;
 
 use App\DTO\Order\CreateOrderData;
 use App\Enums\OrderStatus;
+use App\Enums\PaymentStatus;
+use App\Enums\TransactionStatus;
 use App\Exceptions\InsufficientStockException;
 use App\Models\Cart;
 use App\Models\CartItem;
 use App\Models\Customer;
 use App\Models\DeliveryMethod;
 use App\Models\Order;
+use App\Models\Transaction;
 use App\Exceptions\InvalidOrderStatusException;
 use App\Models\OrderItem;
 use App\Models\PaymentMethod;
@@ -671,6 +674,119 @@ class OrderControllerTest extends TestCase
         ]);
     }
 
+    public function test_paid_order_cannot_be_cancelled_without_refund(): void
+    {
+        $customer = Customer::factory()->create();
+
+        Sanctum::actingAs($customer, guard: 'customers');
+
+        $product = Product::factory()->create([
+            'stock_quantity' => 5,
+            'in_stock' => true,
+            'price' => 100.00,
+        ]);
+
+        $order = Order::factory()->create([
+            'customer_id' => $customer->id,
+            'status' => OrderStatus::PENDING->value,
+            'payment_status' => 'paid',
+        ]);
+
+        OrderItem::factory()->create([
+            'order_id' => $order->id,
+            'product_id' => $product->id,
+            'product_name' => $product->name,
+            'product_sku' => $product->sku,
+            'quantity' => 2,
+            'unit_price' => 100.00,
+            'total_price' => 200.00,
+        ]);
+
+        for ($attempt = 0; $attempt < 2; $attempt++) {
+            $response = $this->putJson(
+                route('api.v1.orders.cancel', $order),
+                ['reason' => 'Customer requested cancellation']
+            );
+
+            $response->assertStatus(400);
+
+            $this->assertDatabaseHas('orders', [
+                'id' => $order->id,
+                'status' => OrderStatus::PENDING->value,
+                'payment_status' => 'paid',
+            ]);
+
+            $this->assertSame(
+                5,
+                $product->fresh()->stock_quantity,
+                'Paid order cancellation must not restore stock.'
+            );
+        }
+    }
+
+    public function test_order_with_active_payment_cannot_be_cancelled(): void
+    {
+        $customer = Customer::factory()->create();
+
+        Sanctum::actingAs($customer, guard: 'customers');
+
+        $product = Product::factory()->create([
+            'stock_quantity' => 5,
+            'in_stock' => true,
+            'price' => 100.00,
+        ]);
+
+        $order = Order::factory()->create([
+            'customer_id' => $customer->id,
+            'status' => OrderStatus::PENDING->value,
+            'payment_status' => 'pending',
+        ]);
+
+        OrderItem::factory()->create([
+            'order_id' => $order->id,
+            'product_id' => $product->id,
+            'product_name' => $product->name,
+            'product_sku' => $product->sku,
+            'quantity' => 2,
+            'unit_price' => 100.00,
+            'total_price' => 200.00,
+        ]);
+
+        foreach ([
+            TransactionStatus::PENDING,
+            TransactionStatus::PROCESSING,
+        ] as $transactionStatus) {
+            $transaction = Transaction::factory()->create([
+                'order_id' => $order->id,
+                'customer_id' => $customer->id,
+                'gateway' => 'tinkoff',
+                'payment_method' => 'card',
+                'status' => $transactionStatus,
+            ]);
+
+            $response = $this->putJson(
+                route('api.v1.orders.cancel', $order),
+                ['reason' => 'Customer requested cancellation']
+            );
+
+            $response->assertStatus(400);
+
+            $this->assertDatabaseHas('orders', [
+                'id' => $order->id,
+                'status' => OrderStatus::PENDING->value,
+                'payment_status' => 'pending',
+            ]);
+
+            $this->assertSame(
+                5,
+                $product->fresh()->stock_quantity,
+                'Stock must not be restored during an active payment.'
+            );
+
+            $transaction->delete();
+        }
+    }
+
     public function test_cancel_does_not_restore_stock_twice_from_stale_order_instances(): void
     {
         $customer = Customer::factory()->create();
@@ -684,6 +800,7 @@ class OrderControllerTest extends TestCase
         $order = Order::factory()->create([
             'customer_id' => $customer->id,
             'status' => OrderStatus::PENDING->value,
+            'payment_status' => PaymentStatus::PENDING->value,
         ]);
 
         OrderItem::factory()->create([
@@ -912,6 +1029,7 @@ class OrderControllerTest extends TestCase
         $order = Order::factory()->create([
             'customer_id' => $customer->id,
             'status' => OrderStatus::PENDING->value,
+            'payment_status' => PaymentStatus::PENDING->value,
         ]);
 
         OrderItem::factory()->create([

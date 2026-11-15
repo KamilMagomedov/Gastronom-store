@@ -14,6 +14,9 @@ use Filament\Tables\Table;
 use App\Enums\OrderStatus;
 use App\Services\OrderService;
 use Illuminate\Database\Eloquent\Model;
+use App\Enums\PaymentStatus;
+use Filament\Tables\Filters\Filter;
+use Illuminate\Database\Eloquent\Builder;
 
 class OrdersTable
 {
@@ -102,6 +105,17 @@ class OrdersTable
                 SelectFilter::make('payment_status')
                     ->options(fn (): array => collect(\App\Enums\PaymentStatus::cases())->mapWithKeys(fn ($case) => [$case->value => $case->getLabel()])->toArray())
                     ->label('Статус оплаты'),
+
+                Filter::make('cancelled_but_paid')
+                    ->label('Отменённые с полученной оплатой')
+                    ->query(
+                        fn (Builder $query): Builder => $query
+                            ->where('status', OrderStatus::CANCELLED->value)
+                            ->whereIn('payment_status', [
+                                PaymentStatus::PAID->value,
+                                PaymentStatus::PARTIALLY_REFUNDED->value,
+                            ])
+                    ),
 
                 SelectFilter::make('delivery_method_id')
                     ->options(fn (): array => \App\Models\DeliveryMethod::getOptions())

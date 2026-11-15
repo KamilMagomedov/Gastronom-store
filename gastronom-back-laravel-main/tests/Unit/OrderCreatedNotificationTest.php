@@ -42,7 +42,10 @@ class OrderCreatedNotificationTest extends TestCase
         $notification = new OrderCreatedNotification($order);
 
         $via = $notification->via($customer);
-        $this->assertEquals(['mail'], $via);
+        $this->assertEquals(
+            ['mail', 'database'],
+            $via
+        );
 
         $mailMessage = $notification->toMail($customer);
 
@@ -56,6 +59,18 @@ class OrderCreatedNotificationTest extends TestCase
 
         $this->assertTrue(
             $reflection->implementsInterface(\Illuminate\Contracts\Queue\ShouldQueue::class)
+        );
+    }
+
+    public function test_notification_is_dispatched_after_commit(): void
+    {
+        $order = Order::factory()->create();
+
+        $notification = new OrderCreatedNotification($order);
+
+        $this->assertTrue(
+            $notification->afterCommit,
+            'Order notification must only be dispatched after the database transaction commits.'
         );
     }
 }

@@ -86,7 +86,11 @@ class PaymentControllerTest extends TestCase
         $paymentMethod = PaymentMethod::factory()->create();
 
         $cart = Cart::factory()->create(['customer_id' => $customer->id]);
-        $product = Product::factory()->create();
+
+        $product = Product::factory()->create([
+            'price' => 50.00,
+        ]);
+
         CartItem::factory()->create([
             'cart_id' => $cart->id,
             'product_id' => $product->id,
@@ -1153,5 +1157,67 @@ class PaymentControllerTest extends TestCase
             'gateway_transaction_id',
             $body
         );
+    }
+
+    public function test_tinkoff_confirmed_webhook_for_cancelled_order_records_payment(): void
+    {
+        $customer = Customer::factory()->create();
+
+        $paymentMethod = PaymentMethod::factory()->sbp()->create();
+
+        $order = Order::factory()->create([
+            'customer_id' => $customer->id,
+            'payment_method_id' => $paymentMethod->id,
+            'status' => 'cancelled',
+            'payment_status' => 'pending',
+        ]);
+
+        $acquirer = $paymentMethod->acquirer()->firstOrFail();
+
+        $paymentId = 'late-confirmed-'.$order->id;
+
+        $payload = [
+            'TerminalKey' => $acquirer->config['terminal_key'],
+            'OrderId' => (string) $order->id,
+            'Success' => true,
+            'Status' => 'CONFIRMED',
+            'PaymentId' => $paymentId,
+            'ErrorCode' => '0',
+            'Amount' => (int) round(
+                ((float) $order->total_amount) * 100
+            ),
+        ];
+
+        $tokenData = $payload;
+        $tokenData['Password'] = $acquirer->config['secret_key'];
+
+        ksort($tokenData);
+
+        $payload['Token'] = hash(
+            'sha256',
+            implode('', array_map(
+                static fn ($value) => (string) $value,
+                $tokenData
+            ))
+        );
+
+        $response = $this->postJson(
+            route('api.payments.webhook', ['gateway' => 'tinkoff']),
+            $payload
+        );
+
+        $response->assertStatus(200);
+
+        $this->assertDatabaseHas('transactions', [
+            'order_id' => $order->id,
+            'gateway_transaction_id' => $paymentId,
+            'status' => 'completed',
+        ]);
+
+        $this->assertDatabaseHas('orders', [
+            'id' => $order->id,
+            'status' => 'cancelled',
+            'payment_status' => 'paid',
+        ]);
     }
 }
