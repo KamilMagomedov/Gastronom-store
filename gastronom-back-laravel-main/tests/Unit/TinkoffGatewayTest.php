@@ -9,6 +9,7 @@ use App\Models\Transaction;
 use App\Services\Payment\Gateways\TinkoffGateway;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\Http;
+use Illuminate\Http\Client\ConnectionException;
 use Tests\TestCase;
 
 class TinkoffGatewayTest extends TestCase
@@ -280,6 +281,89 @@ class TinkoffGatewayTest extends TestCase
                     TransactionStatus::PENDING->value,
                     TransactionStatus::PROCESSING->value,
                 ])
+                ->count()
+        );
+    }
+
+    public function test_create_payment_timeout_preserves_attempt_and_prevents_duplicate_init(): void
+    {
+        $customer = Customer::factory()->create();
+
+        $order = Order::factory()->create([
+            'customer_id' => $customer->id,
+            'payment_status' => 'pending',
+        ]);
+
+        $gateway = new TinkoffGateway([
+            'terminal_key' => 'tink_test_terminal',
+            'secret_key' => 'tink_test_secret',
+        ]);
+
+        $requestCount = 0;
+
+        Http::fake([
+            'https://securepay.tinkoff.ru/v2/Init' => function () use (&$requestCount) {
+                $requestCount++;
+
+                throw new ConnectionException(
+                    'Simulated payment provider timeout'
+                );
+            },
+        ]);
+
+        try {
+            $gateway->createPayment($order);
+
+            $this->fail('Expected payment timeout exception.');
+        } catch (ConnectionException $exception) {
+            $this->assertSame(
+                'Simulated payment provider timeout',
+                $exception->getMessage()
+            );
+        }
+
+        $transaction = Transaction::query()
+            ->where('order_id', $order->id)
+            ->where('gateway', 'tinkoff')
+            ->sole();
+
+        $this->assertSame(
+            TransactionStatus::PROCESSING,
+            $transaction->status
+        );
+
+        $this->assertNotEmpty(
+            $transaction->gateway_order_id
+        );
+
+        $this->assertNull(
+            $transaction->gateway_transaction_id
+        );
+
+        try {
+            $gateway->createPayment($order);
+
+            $this->fail(
+                'Expected duplicate initialization to be rejected.'
+            );
+        } catch (\App\Services\Payment\Exceptions\PaymentException $exception) {
+            $this->assertSame(
+                'Payment initialization is already in progress',
+                $exception->getMessage()
+            );
+        }
+
+        $this->assertSame(
+            1,
+            $requestCount,
+            'Payment initialization must not send a second /Init request after timeout.'
+        );
+
+        $this->assertSame(
+            1,
+            Transaction::query()
+                ->where('order_id', $order->id)
+                ->where('gateway', 'tinkoff')
                 ->count()
         );
     }
