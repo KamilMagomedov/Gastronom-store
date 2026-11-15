@@ -39,6 +39,47 @@ class TinkoffGateway extends BaseAcquirerGateway implements PaymentGateway
         return $this->gatewayName;
     }
 
+    public function checkOrderStatus(string $gatewayOrderId): array
+    {
+        if (! $this->isAvailable()) {
+            throw new PaymentException(
+                'Tinkoff payment gateway is not configured'
+            );
+        }
+
+        if ($gatewayOrderId === '') {
+            throw new PaymentException(
+                'Gateway order ID is required'
+            );
+        }
+
+        $payload = [
+            'TerminalKey' => $this->config['terminal_key'],
+            'OrderId' => $gatewayOrderId,
+        ];
+
+        $payload['Token'] = $this->generateToken($payload);
+
+        $response = $this->sendRequest(
+            'POST',
+            $this->apiUrl.'/CheckOrder',
+            $payload
+        );
+
+        $data = $response['body'];
+
+        if (
+            ! $response['success']
+            || ($data['Success'] ?? false) !== true
+        ) {
+            throw new PaymentException(
+                'Unable to retrieve payment status from provider'
+            );
+        }
+
+        return $data;
+    }
+
     public function createPayment(Order $order): array
     {
         $reservation = DB::transaction(function () use ($order): array {

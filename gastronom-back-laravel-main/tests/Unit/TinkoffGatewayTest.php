@@ -649,4 +649,138 @@ class TinkoffGatewayTest extends TestCase
             Transaction::where('gateway_order_id', $gatewayOrderId)->count()
         );
     }
+
+    public function test_check_order_status_sends_signed_request_without_modifying_transaction(): void
+    {
+        $customer = Customer::factory()->create();
+
+        $order = Order::factory()->create([
+            'customer_id' => $customer->id,
+            'payment_status' => 'pending',
+        ]);
+
+        $config = [
+            'terminal_key' => 'tink_test_terminal',
+            'secret_key' => 'tink_test_secret',
+        ];
+
+        $gatewayOrderId = 'attempt-'.$order->id.'-check';
+
+        $transaction = Transaction::factory()->create([
+            'order_id' => $order->id,
+            'customer_id' => $customer->id,
+            'gateway' => 'tinkoff',
+            'gateway_order_id' => $gatewayOrderId,
+            'gateway_transaction_id' => null,
+            'status' => TransactionStatus::PROCESSING,
+        ]);
+
+        $gateway = new TinkoffGateway($config);
+
+        $bankResponse = [
+            'Success' => true,
+            'OrderId' => $gatewayOrderId,
+            'Payments' => [],
+        ];
+
+        Http::fake([
+            'https://securepay.tinkoff.ru/v2/CheckOrder'
+                => Http::response($bankResponse, 200),
+        ]);
+
+        $result = $gateway->checkOrderStatus($gatewayOrderId);
+
+        $this->assertSame($bankResponse, $result);
+
+        $tokenData = [
+            'TerminalKey' => $config['terminal_key'],
+            'OrderId' => $gatewayOrderId,
+            'Password' => $config['secret_key'],
+        ];
+
+        ksort($tokenData);
+
+        $expectedToken = hash(
+            'sha256',
+            implode('', array_map(
+                static fn ($value) => (string) $value,
+                $tokenData
+            ))
+        );
+
+        Http::assertSent(function ($request) use (
+            $config,
+            $gatewayOrderId,
+            $expectedToken
+        ) {
+            return $request->method() === 'POST'
+                && $request->url()
+                    === 'https://securepay.tinkoff.ru/v2/CheckOrder'
+                && $request['TerminalKey'] === $config['terminal_key']
+                && $request['OrderId'] === $gatewayOrderId
+                && $request['Token'] === $expectedToken;
+        });
+
+        Http::assertSentCount(1);
+
+        $transaction->refresh();
+
+        $this->assertSame(
+            TransactionStatus::PROCESSING,
+            $transaction->status
+        );
+
+        $this->assertNull(
+            $transaction->gateway_transaction_id
+        );
+
+        $this->assertSame(
+            'pending',
+            $order->fresh()->payment_status
+        );
+    }
+
+    public function test_check_order_status_rejects_provider_error(): void
+    {
+        $gateway = new TinkoffGateway([
+            'terminal_key' => 'tink_test_terminal',
+            'secret_key' => 'tink_test_secret',
+        ]);
+
+        Http::fake([
+            'https://securepay.tinkoff.ru/v2/CheckOrder' =>
+                Http::response([
+                    'Success' => false,
+                    'ErrorCode' => '5',
+                    'Message' => 'Order not found',
+                ], 200),
+        ]);
+
+        $this->expectException(
+            \App\Services\Payment\Exceptions\PaymentException::class
+        );
+
+        $this->expectExceptionMessage(
+            'Unable to retrieve payment status from provider'
+        );
+
+        $gateway->checkOrderStatus('unknown-order-id');
+    }
+
+    public function test_check_order_status_requires_gateway_configuration(): void
+    {
+        $gateway = new TinkoffGateway([]);
+
+        Http::preventStrayRequests();
+
+        $this->expectException(
+            \App\Services\Payment\Exceptions\PaymentException::class
+        );
+
+        $this->expectExceptionMessage(
+            'Tinkoff payment gateway is not configured'
+        );
+
+        $gateway->checkOrderStatus('test-order-id');
+    }
 }
