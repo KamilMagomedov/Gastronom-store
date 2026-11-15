@@ -3,6 +3,7 @@
 namespace App\Services;
 
 use App\Enums\TransactionStatus;
+use App\Enums\PaymentStatus;
 use App\Models\Customer;
 use App\Models\Order;
 use App\Models\Transaction;
@@ -10,42 +11,110 @@ use Illuminate\Support\Facades\DB;
 
 class PaymentService
 {
-    public function createTransaction(Order $order, string $paymentMethod, ?string $gateway = null): Transaction
-    {
-        return DB::transaction(function () use ($order, $paymentMethod, $gateway) {
+    public function createTransaction(
+        Order $order,
+        string $paymentMethod,
+        ?string $gateway = null
+    ): Transaction {
+        return DB::transaction(function () use (
+            $order,
+            $paymentMethod,
+            $gateway
+        ): Transaction {
+            $lockedOrder = Order::query()
+                ->whereKey($order->id)
+                ->lockForUpdate()
+                ->firstOrFail();
+
+            if (in_array(
+                $lockedOrder->getRawOriginal('payment_status'),
+                [
+                    PaymentStatus::PAID->value,
+                    PaymentStatus::PARTIALLY_REFUNDED->value,
+                ],
+                true
+            )) {
+                throw new \DomainException('Order is already paid');
+            }
+
             $transaction = Transaction::create([
-                'order_id' => $order->id,
-                'customer_id' => $order->customer_id,
-                'amount' => $order->total_amount,
+                'order_id' => $lockedOrder->id,
+                'customer_id' => $lockedOrder->customer_id,
+                'amount' => $lockedOrder->total_amount,
                 'currency' => 'RUB',
                 'payment_method' => $paymentMethod,
                 'gateway' => $gateway,
                 'status' => TransactionStatus::PENDING,
             ]);
 
-            $order->update(['payment_status' => 'pending']);
+            $lockedOrder->update([
+                'payment_status' => PaymentStatus::PENDING->value,
+            ]);
 
             return $transaction;
         });
     }
 
-    public function processPayment(Transaction $transaction, array $gatewayResponse): Transaction
-    {
-        return DB::transaction(function () use ($transaction, $gatewayResponse) {
-            $transaction->update([
-                'gateway_response' => $gatewayResponse,
-                'gateway_transaction_id' => $gatewayResponse['transaction_id'] ?? null,
-            ]);
+    public function processPayment(
+        Transaction $transaction,
+        array $gatewayResponse
+    ): Transaction {
+        return DB::transaction(function () use (
+            $transaction,
+            $gatewayResponse
+        ): Transaction {
+            $currentTransaction = Transaction::query()
+                ->whereKey($transaction->getKey())
+                ->lockForUpdate()
+                ->firstOrFail();
 
-            if ($gatewayResponse['success'] ?? false) {
-                $transaction->markAsCompleted();
-                $transaction->order->update(['payment_status' => 'paid']);
-            } else {
-                $transaction->markAsFailed($gatewayResponse['message'] ?? 'Payment failed');
-                $transaction->order->update(['payment_status' => 'failed']);
+            if (! in_array(
+                $currentTransaction->status,
+                [
+                    TransactionStatus::PENDING,
+                    TransactionStatus::PROCESSING,
+                ],
+                true
+            )) {
+                return $currentTransaction;
             }
 
-            return $transaction;
+            $incomingPaymentId = $gatewayResponse['transaction_id'] ?? null;
+
+            if (
+                $incomingPaymentId !== null
+                && $currentTransaction->gateway_transaction_id !== null
+                && (string) $currentTransaction->gateway_transaction_id
+                    !== (string) $incomingPaymentId
+            ) {
+                throw new \DomainException(
+                    'Payment transaction ID mismatch'
+                );
+            }
+
+            $success = $gatewayResponse['success'] ?? false;
+
+            $currentTransaction->update([
+                'gateway_response' => $gatewayResponse,
+                'gateway_transaction_id' =>
+                    $incomingPaymentId
+                    ?? $currentTransaction->gateway_transaction_id,
+                'status' => $success
+                    ? TransactionStatus::COMPLETED
+                    : TransactionStatus::FAILED,
+                'processed_at' => now(),
+                'notes' => $success
+                    ? $currentTransaction->notes
+                    : ($gatewayResponse['message'] ?? 'Payment failed'),
+            ]);
+
+            $currentTransaction->order()->update([
+                'payment_status' => $success
+                    ? PaymentStatus::PAID->value
+                    : PaymentStatus::FAILED->value,
+            ]);
+
+            return $currentTransaction->refresh();
         });
     }
 

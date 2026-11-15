@@ -32,6 +32,7 @@ class PaymentServiceTest extends TestCase
         $order = Order::factory()->create([
             'customer_id' => $customer->id,
             'payment_method_id' => $paymentMethod->id,
+            'payment_status' => 'pending',
             'shipping_amount' => 0,
             'delivery_cost' => 0,
         ]);
@@ -74,6 +75,7 @@ class PaymentServiceTest extends TestCase
             'order_id' => $order->id,
             'customer_id' => $customer->id,
             'gateway' => 'sberbank',
+            'gateway_transaction_id' => null,
             'status' => TransactionStatus::PENDING,
         ]);
 
@@ -218,5 +220,139 @@ class PaymentServiceTest extends TestCase
         $this->assertEquals(1, $stats['completed_transactions']);
         $this->assertEquals(0, $stats['failed_transactions']);
         $this->assertEquals(500.00, $stats['total_amount']);
+    }
+
+    public function test_completed_payment_cannot_be_overwritten_by_late_failure(): void
+    {
+        $customer = Customer::factory()->create();
+
+        $order = Order::factory()->create([
+            'customer_id' => $customer->id,
+            'payment_status' => 'paid',
+        ]);
+
+        $transaction = Transaction::factory()->create([
+            'order_id' => $order->id,
+            'customer_id' => $customer->id,
+            'gateway' => 'sberbank',
+            'gateway_transaction_id' => 'payment-123',
+            'status' => TransactionStatus::COMPLETED,
+            'processed_at' => now(),
+        ]);
+
+        $result = $this->paymentService->processPayment(
+            $transaction,
+            [
+                'success' => false,
+                'transaction_id' => 'payment-123',
+                'message' => 'Late failure notification',
+            ]
+        );
+
+        $this->assertSame(
+            TransactionStatus::COMPLETED,
+            $result->fresh()->status
+        );
+
+        $this->assertSame(
+            'paid',
+            $order->fresh()->payment_status
+        );
+
+        $this->assertSame(
+            'payment-123',
+            $transaction->fresh()->gateway_transaction_id
+        );
+    }
+
+    public function test_cannot_create_transaction_for_already_paid_order(): void
+    {
+        $customer = Customer::factory()->create();
+
+        $order = Order::factory()->create([
+            'customer_id' => $customer->id,
+            'payment_status' => 'paid',
+        ]);
+
+        try {
+            $this->paymentService->createTransaction(
+                $order,
+                'card',
+                'sberbank'
+            );
+
+            $this->fail(
+                'Expected already paid order to be rejected.'
+            );
+        } catch (\DomainException $exception) {
+            $this->assertSame(
+                'Order is already paid',
+                $exception->getMessage()
+            );
+        }
+
+        $this->assertSame(
+            'paid',
+            $order->fresh()->payment_status
+        );
+
+        $this->assertSame(
+            0,
+            Transaction::query()
+                ->where('order_id', $order->id)
+                ->count()
+        );
+    }
+
+    public function test_process_payment_rejects_mismatched_gateway_transaction_id(): void
+    {
+        $customer = Customer::factory()->create();
+
+        $order = Order::factory()->create([
+            'customer_id' => $customer->id,
+            'payment_status' => 'pending',
+        ]);
+
+        $transaction = Transaction::factory()->create([
+            'order_id' => $order->id,
+            'customer_id' => $customer->id,
+            'gateway' => 'sberbank',
+            'gateway_transaction_id' => 'payment-123',
+            'status' => TransactionStatus::PENDING,
+        ]);
+
+        try {
+            $this->paymentService->processPayment(
+                $transaction,
+                [
+                    'success' => true,
+                    'transaction_id' => 'payment-999',
+                ]
+            );
+
+            $this->fail('Expected payment ID mismatch to be rejected.');
+        } catch (\DomainException $exception) {
+            $this->assertSame(
+                'Payment transaction ID mismatch',
+                $exception->getMessage()
+            );
+        }
+
+        $transaction->refresh();
+
+        $this->assertSame(
+            TransactionStatus::PENDING,
+            $transaction->status
+        );
+
+        $this->assertSame(
+            'payment-123',
+            $transaction->gateway_transaction_id
+        );
+
+        $this->assertSame(
+            'pending',
+            $order->fresh()->payment_status
+        );
     }
 }
