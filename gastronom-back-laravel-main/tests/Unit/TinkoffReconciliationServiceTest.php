@@ -208,6 +208,7 @@ class TinkoffReconciliationServiceTest extends TestCase
             'customer_id' => $customer->id,
             'gateway' => 'tinkoff',
             'gateway_order_id' => 'old-attempt-id',
+            'gateway_transaction_id' => null,
             'status' => TransactionStatus::PROCESSING,
         ]);
 
@@ -286,6 +287,461 @@ class TinkoffReconciliationServiceTest extends TestCase
         } catch (PaymentException $exception) {
             $this->assertSame(
                 'Bank order ID mismatch',
+                $exception->getMessage()
+            );
+        }
+
+        $this->assertSame(
+            TransactionStatus::PROCESSING,
+            $transaction->fresh()->status
+        );
+
+        $this->assertSame(
+            'pending',
+            $order->fresh()->payment_status
+        );
+    }
+
+    public function test_inspect_rejects_mismatched_bank_payment_amount(): void
+    {
+        $customer = Customer::factory()->create();
+
+        $order = Order::factory()->create([
+            'customer_id' => $customer->id,
+            'payment_status' => 'pending',
+            'total_amount' => 1000.00,
+        ]);
+
+        $transaction = Transaction::factory()->create([
+            'order_id' => $order->id,
+            'customer_id' => $customer->id,
+            'gateway' => 'tinkoff',
+            'gateway_order_id' => 'attempt-amount-check',
+            'gateway_transaction_id' => null,
+            'amount' => 1000.00,
+            'status' => TransactionStatus::PROCESSING,
+        ]);
+
+        $gateway = Mockery::mock(TinkoffGateway::class);
+
+        $gateway->shouldReceive('checkOrderStatus')
+            ->once()
+            ->with('attempt-amount-check')
+            ->andReturn([
+                'Success' => true,
+                'OrderId' => 'attempt-amount-check',
+                'Payments' => [
+                    [
+                        'PaymentId' => 123456,
+                        'Amount' => 50000,
+                        'Status' => 'CONFIRMED',
+                        'Success' => true,
+                    ],
+                ],
+            ]);
+
+        $service = new TinkoffReconciliationService();
+
+        try {
+            $service->inspect($transaction, $gateway);
+
+            $this->fail('Expected bank payment amount mismatch.');
+        } catch (PaymentException $exception) {
+            $this->assertSame(
+                'Bank payment amount mismatch',
+                $exception->getMessage()
+            );
+        }
+
+        $this->assertSame(
+            TransactionStatus::PROCESSING,
+            $transaction->fresh()->status
+        );
+
+        $this->assertSame(
+            'pending',
+            $order->fresh()->payment_status
+        );
+    }
+
+    public function test_inspect_rejects_mismatched_bank_payment_id(): void
+    {
+        $customer = Customer::factory()->create();
+
+        $order = Order::factory()->create([
+            'customer_id' => $customer->id,
+            'payment_status' => 'pending',
+        ]);
+
+        $transaction = Transaction::factory()->create([
+            'order_id' => $order->id,
+            'customer_id' => $customer->id,
+            'gateway' => 'tinkoff',
+            'gateway_order_id' => 'attempt-payment-id-check',
+            'gateway_transaction_id' => '123456',
+            'amount' => '1000.00',
+            'status' => TransactionStatus::PROCESSING,
+        ]);
+
+        $gateway = Mockery::mock(TinkoffGateway::class);
+
+        $gateway->shouldReceive('checkOrderStatus')
+            ->once()
+            ->with('attempt-payment-id-check')
+            ->andReturn([
+                'Success' => true,
+                'OrderId' => 'attempt-payment-id-check',
+                'Payments' => [
+                    [
+                        'PaymentId' => 999999,
+                        'Amount' => 100000,
+                        'Status' => 'CONFIRMED',
+                        'Success' => true,
+                    ],
+                ],
+            ]);
+
+        $service = new TinkoffReconciliationService();
+
+        try {
+            $service->inspect($transaction, $gateway);
+
+            $this->fail('Expected bank PaymentId mismatch.');
+        } catch (PaymentException $exception) {
+            $this->assertSame(
+                'Bank payment ID mismatch',
+                $exception->getMessage()
+            );
+        }
+
+        $this->assertSame(
+            '123456',
+            $transaction->fresh()->gateway_transaction_id
+        );
+
+        $this->assertSame(
+            TransactionStatus::PROCESSING,
+            $transaction->fresh()->status
+        );
+
+        $this->assertSame(
+            'pending',
+            $order->fresh()->payment_status
+        );
+    }
+
+    public function test_inspect_accepts_matching_bank_payment_id(): void
+    {
+        $customer = Customer::factory()->create();
+
+        $order = Order::factory()->create([
+            'customer_id' => $customer->id,
+            'payment_status' => 'pending',
+        ]);
+
+        $transaction = Transaction::factory()->create([
+            'order_id' => $order->id,
+            'customer_id' => $customer->id,
+            'gateway' => 'tinkoff',
+            'gateway_order_id' => 'attempt-matching-id',
+            'gateway_transaction_id' => '123456',
+            'amount' => '1000.00',
+            'status' => TransactionStatus::PROCESSING,
+        ]);
+
+        $bankResponse = [
+            'Success' => true,
+            'OrderId' => 'attempt-matching-id',
+            'Payments' => [
+                [
+                    'PaymentId' => 123456,
+                    'Amount' => 100000,
+                    'Status' => 'CONFIRMED',
+                    'Success' => true,
+                ],
+            ],
+        ];
+
+        $gateway = Mockery::mock(TinkoffGateway::class);
+
+        $gateway->shouldReceive('checkOrderStatus')
+            ->once()
+            ->with('attempt-matching-id')
+            ->andReturn($bankResponse);
+
+        $service = new TinkoffReconciliationService();
+
+        $result = $service->inspect($transaction, $gateway);
+
+        $this->assertSame($bankResponse, $result);
+
+        $this->assertSame(
+            '123456',
+            $transaction->fresh()->gateway_transaction_id
+        );
+
+        $this->assertSame(
+            TransactionStatus::PROCESSING,
+            $transaction->fresh()->status
+        );
+
+        $this->assertSame(
+            'pending',
+            $order->fresh()->payment_status
+        );
+    }
+
+    public function test_inspect_accepts_bank_payment_when_local_payment_id_is_missing(): void
+    {
+        $customer = Customer::factory()->create();
+
+        $order = Order::factory()->create([
+            'customer_id' => $customer->id,
+            'payment_status' => 'pending',
+        ]);
+
+        $transaction = Transaction::factory()->create([
+            'order_id' => $order->id,
+            'customer_id' => $customer->id,
+            'gateway' => 'tinkoff',
+            'gateway_order_id' => 'attempt-timeout',
+            'gateway_transaction_id' => null,
+            'amount' => '1000.00',
+            'status' => TransactionStatus::PROCESSING,
+        ]);
+
+        $bankResponse = [
+            'Success' => true,
+            'OrderId' => 'attempt-timeout',
+            'Payments' => [
+                [
+                    'PaymentId' => 123456,
+                    'Amount' => 100000,
+                    'Status' => 'CONFIRMED',
+                    'Success' => true,
+                ],
+            ],
+        ];
+
+        $gateway = Mockery::mock(TinkoffGateway::class);
+
+        $gateway->shouldReceive('checkOrderStatus')
+            ->once()
+            ->with('attempt-timeout')
+            ->andReturn($bankResponse);
+
+        $service = new TinkoffReconciliationService();
+
+        $result = $service->inspect($transaction, $gateway);
+
+        $this->assertSame($bankResponse, $result);
+
+        // Inspection must not automatically save PaymentId.
+        $this->assertNull(
+            $transaction->fresh()->gateway_transaction_id
+        );
+
+        $this->assertSame(
+            TransactionStatus::PROCESSING,
+            $transaction->fresh()->status
+        );
+
+        $this->assertSame(
+            'pending',
+            $order->fresh()->payment_status
+        );
+    }
+
+    public function test_inspect_rejects_ambiguous_bank_payments_when_local_payment_id_is_missing(): void
+    {
+        $customer = Customer::factory()->create();
+
+        $order = Order::factory()->create([
+            'customer_id' => $customer->id,
+            'payment_status' => 'pending',
+        ]);
+
+        $transaction = Transaction::factory()->create([
+            'order_id' => $order->id,
+            'customer_id' => $customer->id,
+            'gateway' => 'tinkoff',
+            'gateway_order_id' => 'attempt-ambiguous',
+            'gateway_transaction_id' => null,
+            'amount' => '1000.00',
+            'status' => TransactionStatus::PROCESSING,
+        ]);
+
+        $gateway = Mockery::mock(TinkoffGateway::class);
+
+        $gateway->shouldReceive('checkOrderStatus')
+            ->once()
+            ->with('attempt-ambiguous')
+            ->andReturn([
+                'Success' => true,
+                'OrderId' => 'attempt-ambiguous',
+                'Payments' => [
+                    [
+                        'PaymentId' => 111111,
+                        'Amount' => 100000,
+                        'Status' => 'REJECTED',
+                        'Success' => false,
+                    ],
+                    [
+                        'PaymentId' => 222222,
+                        'Amount' => 100000,
+                        'Status' => 'CONFIRMED',
+                        'Success' => true,
+                    ],
+                ],
+            ]);
+
+        $service = new TinkoffReconciliationService();
+
+        try {
+            $service->inspect($transaction, $gateway);
+
+            $this->fail('Expected ambiguous bank payments.');
+        } catch (PaymentException $exception) {
+            $this->assertSame(
+                'Ambiguous bank payments',
+                $exception->getMessage()
+            );
+        }
+
+        $this->assertNull(
+            $transaction->fresh()->gateway_transaction_id
+        );
+
+        $this->assertSame(
+            TransactionStatus::PROCESSING,
+            $transaction->fresh()->status
+        );
+
+        $this->assertSame(
+            'pending',
+            $order->fresh()->payment_status
+        );
+    }
+
+    public function test_inspect_accepts_matching_payment_among_multiple_bank_payments(): void
+    {
+        $customer = Customer::factory()->create();
+
+        $order = Order::factory()->create([
+            'customer_id' => $customer->id,
+            'payment_status' => 'pending',
+        ]);
+
+        $transaction = Transaction::factory()->create([
+            'order_id' => $order->id,
+            'customer_id' => $customer->id,
+            'gateway' => 'tinkoff',
+            'gateway_order_id' => 'attempt-multiple-payments',
+            'gateway_transaction_id' => '222222',
+            'amount' => '1000.00',
+            'status' => TransactionStatus::PROCESSING,
+        ]);
+
+        $bankResponse = [
+            'Success' => true,
+            'OrderId' => 'attempt-multiple-payments',
+            'Payments' => [
+                [
+                    'PaymentId' => 111111,
+                    'Amount' => 50000,
+                    'Status' => 'REJECTED',
+                    'Success' => false,
+                ],
+                [
+                    'PaymentId' => 222222,
+                    'Amount' => 100000,
+                    'Status' => 'CONFIRMED',
+                    'Success' => true,
+                ],
+            ],
+        ];
+
+        $gateway = Mockery::mock(TinkoffGateway::class);
+
+        $gateway->shouldReceive('checkOrderStatus')
+            ->once()
+            ->with('attempt-multiple-payments')
+            ->andReturn($bankResponse);
+
+        $service = new TinkoffReconciliationService();
+
+        $result = $service->inspect($transaction, $gateway);
+
+        $this->assertSame($bankResponse, $result);
+
+        $this->assertSame(
+            '222222',
+            $transaction->fresh()->gateway_transaction_id
+        );
+
+        $this->assertSame(
+            TransactionStatus::PROCESSING,
+            $transaction->fresh()->status
+        );
+
+        $this->assertSame(
+            'pending',
+            $order->fresh()->payment_status
+        );
+    }
+
+    public function test_inspect_rejects_duplicate_matching_payment_ids(): void
+    {
+        $customer = Customer::factory()->create();
+
+        $order = Order::factory()->create([
+            'customer_id' => $customer->id,
+            'payment_status' => 'pending',
+        ]);
+
+        $transaction = Transaction::factory()->create([
+            'order_id' => $order->id,
+            'customer_id' => $customer->id,
+            'gateway' => 'tinkoff',
+            'gateway_order_id' => 'attempt-duplicate-id',
+            'gateway_transaction_id' => '222222',
+            'amount' => '1000.00',
+            'status' => TransactionStatus::PROCESSING,
+        ]);
+
+        $gateway = Mockery::mock(TinkoffGateway::class);
+
+        $gateway->shouldReceive('checkOrderStatus')
+            ->once()
+            ->with('attempt-duplicate-id')
+            ->andReturn([
+                'Success' => true,
+                'OrderId' => 'attempt-duplicate-id',
+                'Payments' => [
+                    [
+                        'PaymentId' => 222222,
+                        'Amount' => 100000,
+                        'Status' => 'CONFIRMED',
+                        'Success' => true,
+                    ],
+                    [
+                        'PaymentId' => 222222,
+                        'Amount' => 100000,
+                        'Status' => 'REJECTED',
+                        'Success' => false,
+                    ],
+                ],
+            ]);
+
+        $service = new TinkoffReconciliationService();
+
+        try {
+            $service->inspect($transaction, $gateway);
+
+            $this->fail('Expected duplicate matching PaymentId rejection.');
+        } catch (PaymentException $exception) {
+            $this->assertSame(
+                'Bank payment ID mismatch',
                 $exception->getMessage()
             );
         }

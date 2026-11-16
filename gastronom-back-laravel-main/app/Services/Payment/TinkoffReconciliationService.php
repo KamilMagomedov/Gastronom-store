@@ -32,19 +32,101 @@ class TinkoffReconciliationService
         }
 
         $response = $gateway->checkOrderStatus(
-          (string) $current->gateway_order_id
+            (string) $current->gateway_order_id
         );
 
         if (
-          ! isset($response['OrderId'])
-          || ! is_scalar($response['OrderId'])
-          || (string) $response['OrderId']
-              !== (string) $current->gateway_order_id
+            ! isset($response['OrderId'])
+            || ! is_scalar($response['OrderId'])
+            || (string) $response['OrderId'] !== (string) $current->gateway_order_id
         ) {
-          throw new PaymentException(
-              'Bank order ID mismatch'
-          );
+            throw new PaymentException(
+                'Bank order ID mismatch'
+            );
         }
-      return $response;
+
+        $payments = $response['Payments'] ?? [];
+
+        if (! is_array($payments)) {
+            throw new PaymentException(
+                'Invalid bank payments response'
+            );
+        }
+
+        if (
+            $current->gateway_transaction_id === null
+            && count($payments) > 1
+        ) {
+            throw new PaymentException(
+                'Ambiguous bank payments'
+            );
+        }
+
+        // Convert the decimal transaction amount to kopecks.
+        $amount = (string) $current->amount;
+
+        if (! preg_match('/^\d+\.\d{2}$/', $amount)) {
+            throw new PaymentException(
+                'Invalid transaction amount'
+            );
+        }
+
+        [$rubles, $kopecks] = explode('.', $amount);
+
+        $expectedAmount = ((int) $rubles * 100) + (int) $kopecks;
+
+        $matchingPayments = [];
+
+        if ($current->gateway_transaction_id !== null) {
+            $expectedPaymentId = (string) $current->gateway_transaction_id;
+
+            foreach ($payments as $payment) {
+                if (! is_array($payment)) {
+                    throw new PaymentException(
+                        'Invalid bank payments response'
+                    );
+                }
+
+                $paymentId = $payment['PaymentId'] ?? null;
+
+                if (
+                    ! is_int($paymentId)
+                    && ! (is_string($paymentId) && ctype_digit($paymentId))
+                ) {
+                    throw new PaymentException(
+                        'Bank payment ID mismatch'
+                    );
+                }
+
+                if ((string) $paymentId === $expectedPaymentId) {
+                    $matchingPayments[] = $payment;
+                }
+            }
+
+            if (count($matchingPayments) !== 1) {
+                throw new PaymentException(
+                    'Bank payment ID mismatch'
+                );
+            }
+        } else {
+            // Multiple bank payments without a local PaymentId
+            // cannot be matched unambiguously.
+            $matchingPayments = $payments;
+        }
+
+        foreach ($matchingPayments as $payment) {
+            if (
+                ! is_array($payment)
+                || ! isset($payment['Amount'])
+                || ! is_int($payment['Amount'])
+                || $payment['Amount'] !== $expectedAmount
+            ) {
+                throw new PaymentException(
+                    'Bank payment amount mismatch'
+                );
+            }
+        }
+
+        return $response;
     }
 }
