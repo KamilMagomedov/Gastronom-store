@@ -35,6 +35,12 @@ class TinkoffReconciliationService
             (string) $current->gateway_order_id
         );
 
+        if (($response['Success'] ?? null) !== true) {
+          throw new PaymentException(
+              'Invalid bank response'
+          );
+        }
+
         if (
             ! isset($response['OrderId'])
             || ! is_scalar($response['OrderId'])
@@ -45,13 +51,17 @@ class TinkoffReconciliationService
             );
         }
 
-        $payments = $response['Payments'] ?? [];
-
-        if (! is_array($payments)) {
-            throw new PaymentException(
-                'Invalid bank payments response'
-            );
+        if (
+          ! array_key_exists('Payments', $response)
+          || ! is_array($response['Payments'])
+          || ! array_is_list($response['Payments'])
+        ) {
+          throw new PaymentException(
+              'Invalid bank payments response'
+          );
         }
+
+        $payments = $response['Payments'];
 
         if (
             $current->gateway_transaction_id === null
@@ -115,18 +125,54 @@ class TinkoffReconciliationService
         }
 
         foreach ($matchingPayments as $payment) {
-            if (
-                ! is_array($payment)
-                || ! isset($payment['Amount'])
-                || ! is_int($payment['Amount'])
-                || $payment['Amount'] !== $expectedAmount
-            ) {
-                throw new PaymentException(
-                    'Bank payment amount mismatch'
-                );
-            }
-        }
+          if (
+              ! is_array($payment)
+              || ! isset($payment['Amount'])
+              || ! is_int($payment['Amount'])
+              || $payment['Amount'] !== $expectedAmount
+          ) {
+              throw new PaymentException(
+                  'Bank payment amount mismatch'
+              );
+          }
 
+          $status = $payment['Status'] ?? null;
+
+          if (
+              ! is_string($status)
+              || trim($status) === ''
+          ) {
+              throw new PaymentException(
+                  'Invalid bank payment status'
+              );
+          }
+
+          $knownStatuses = [
+            'NEW',
+            'FORM_SHOWED',
+            'AUTHORIZING',
+            'AUTH_FAIL',
+            '3DS_CHECKING',
+            '3DS_CHECKED',
+            'AUTHORIZED',
+            'CONFIRMING',
+            'CONFIRMED',
+            'REVERSING',
+            'REVERSED',
+            'PARTIAL_REVERSED',
+            'REFUNDING',
+            'REFUNDED',
+            'PARTIAL_REFUNDED',
+            'CANCELED',
+            'REJECTED',
+          ];
+
+          if (! in_array($status, $knownStatuses, true)) {
+            throw new PaymentException(
+                'Unknown bank payment status'
+            );
+          }
+        }
         return $response;
     }
 }
