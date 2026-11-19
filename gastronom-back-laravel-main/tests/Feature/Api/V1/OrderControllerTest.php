@@ -659,6 +659,7 @@ class OrderControllerTest extends TestCase
         $order = Order::factory()->create([
             'customer_id' => $customer->id,
             'status' => OrderStatus::PENDING->value,
+            'payment_status' => 'pending',
         ]);
 
         $cancelData = ['reason' => 'Changed my mind'];
