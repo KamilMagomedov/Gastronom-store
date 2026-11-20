@@ -175,4 +175,78 @@ class TinkoffReconciliationService
         }
         return $response;
     }
+
+  public function inspectSummary(
+    Transaction $transaction,
+    TinkoffGateway $gateway
+  ): array {
+    // Capture the latest database state before contacting the bank.
+    $initial = $transaction->fresh();
+
+    if (! $initial) {
+        throw new PaymentException(
+            'Transaction changed during reconciliation'
+        );
+    }
+
+    // Reuse the existing bank response validation.
+    $response = $this->inspect($transaction, $gateway);
+
+    // A webhook may have changed the transaction during the request.
+    $current = $transaction->fresh();
+
+    if (
+        ! $current
+        || $current->status !== TransactionStatus::PROCESSING
+        || $current->status !== $initial->status
+        || $current->gateway !== $initial->gateway
+        || $current->gateway_order_id !== $initial->gateway_order_id
+        || $current->gateway_transaction_id !== $initial->gateway_transaction_id
+        || $current->order_id !== $initial->order_id
+        || (string) $current->amount !== (string) $initial->amount
+        || (string) $current->gateway_order_id !== (string) $response['OrderId']
+    ) {
+        throw new PaymentException(
+            'Transaction changed during reconciliation'
+        );
+    }
+
+    $payments = $response['Payments'];
+
+    if ($payments === []) {
+        return [
+            'payment_id' => null,
+            'bank_status' => null,
+            'classification' => 'unknown',
+        ];
+    }
+
+    // Find the payment belonging to this transaction.
+    if ($current->gateway_transaction_id !== null) {
+        $payments = array_values(array_filter(
+            $payments,
+            fn (array $payment): bool =>
+                (string) $payment['PaymentId']
+                    === (string) $current->gateway_transaction_id
+        ));
+    }
+
+    if (count($payments) !== 1) {
+        throw new PaymentException(
+            'Bank payment ID mismatch'
+        );
+    }
+
+    $payment = $payments[0];
+
+    $classifier = new TinkoffPaymentStatusClassifier();
+
+    return [
+        'payment_id' => (string) $payment['PaymentId'],
+        'bank_status' => $payment['Status'],
+        'classification' => $classifier->classify(
+            $payment['Status']
+        ),
+    ];
+  }
 }

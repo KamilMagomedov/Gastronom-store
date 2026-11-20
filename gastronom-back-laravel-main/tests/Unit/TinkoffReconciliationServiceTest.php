@@ -1051,4 +1051,465 @@ class TinkoffReconciliationServiceTest extends TestCase
             $transaction->fresh()->gateway_transaction_id
         );
     }
+
+    public function test_inspect_summary_classifies_authorized_payment_without_database_changes(): void
+    {
+        $customer = Customer::factory()->create();
+
+        $order = Order::factory()->create([
+            'customer_id' => $customer->id,
+            'payment_status' => 'pending',
+            'total_amount' => '1000.00',
+        ]);
+
+        $transaction = Transaction::factory()->create([
+            'order_id' => $order->id,
+            'customer_id' => $customer->id,
+            'gateway' => 'tinkoff',
+            'gateway_order_id' => 'attempt-summary',
+            'gateway_transaction_id' => '123456',
+            'amount' => '1000.00',
+            'status' => TransactionStatus::PROCESSING,
+        ]);
+
+        $gateway = Mockery::mock(TinkoffGateway::class);
+
+        $gateway->shouldReceive('checkOrderStatus')
+            ->once()
+            ->with('attempt-summary')
+            ->andReturn([
+                'Success' => true,
+                'OrderId' => 'attempt-summary',
+                'Payments' => [
+                    [
+                        'PaymentId' => 123456,
+                        'Amount' => 100000,
+                        'Status' => 'AUTHORIZED',
+                        'Success' => true,
+                    ],
+                ],
+            ]);
+
+        $service = new TinkoffReconciliationService();
+
+        $result = $service->inspectSummary(
+            $transaction,
+            $gateway
+        );
+
+        $this->assertSame([
+            'payment_id' => '123456',
+            'bank_status' => 'AUTHORIZED',
+            'classification' => 'pending',
+        ], $result);
+
+        $this->assertSame(
+            TransactionStatus::PROCESSING,
+            $transaction->fresh()->status
+        );
+
+        $this->assertSame(
+            'pending',
+            $order->fresh()->payment_status
+        );
+
+        $this->assertSame(
+            '123456',
+            $transaction->fresh()->gateway_transaction_id
+        );
+    }
+
+    public function test_inspect_summary_returns_unknown_when_payments_are_empty(): void
+    {
+        $customer = Customer::factory()->create();
+
+        $order = Order::factory()->create([
+            'customer_id' => $customer->id,
+            'payment_status' => 'pending',
+        ]);
+
+        $transaction = Transaction::factory()->create([
+            'order_id' => $order->id,
+            'customer_id' => $customer->id,
+            'gateway' => 'tinkoff',
+            'gateway_order_id' => 'attempt-empty-payments',
+            'gateway_transaction_id' => null,
+            'amount' => '1000.00',
+            'status' => TransactionStatus::PROCESSING,
+        ]);
+
+        $gateway = Mockery::mock(TinkoffGateway::class);
+
+        $gateway->shouldReceive('checkOrderStatus')
+            ->once()
+            ->with('attempt-empty-payments')
+            ->andReturn([
+                'Success' => true,
+                'OrderId' => 'attempt-empty-payments',
+                'Payments' => [],
+            ]);
+
+        $service = new TinkoffReconciliationService();
+
+        $result = $service->inspectSummary(
+            $transaction,
+            $gateway
+        );
+
+        $this->assertSame([
+            'payment_id' => null,
+            'bank_status' => null,
+            'classification' => 'unknown',
+        ], $result);
+
+        $this->assertNull(
+            $transaction->fresh()->gateway_transaction_id
+        );
+
+        $this->assertSame(
+            TransactionStatus::PROCESSING,
+            $transaction->fresh()->status
+        );
+
+        $this->assertSame(
+            'pending',
+            $order->fresh()->payment_status
+        );
+    }
+
+    public function test_inspect_summary_rejects_transaction_completed_during_bank_request(): void
+    {
+        $customer = Customer::factory()->create();
+
+        $order = Order::factory()->create([
+            'customer_id' => $customer->id,
+            'payment_status' => 'pending',
+        ]);
+
+        $transaction = Transaction::factory()->create([
+            'order_id' => $order->id,
+            'customer_id' => $customer->id,
+            'gateway' => 'tinkoff',
+            'gateway_order_id' => 'attempt-concurrent-webhook',
+            'gateway_transaction_id' => '123456',
+            'amount' => '1000.00',
+            'status' => TransactionStatus::PROCESSING,
+        ]);
+
+        $gateway = Mockery::mock(TinkoffGateway::class);
+
+        $gateway->shouldReceive('checkOrderStatus')
+            ->once()
+            ->with('attempt-concurrent-webhook')
+            ->andReturnUsing(function () use ($transaction) {
+                // Simulate a webhook completing the transaction
+                // while the bank request is in progress.
+                Transaction::query()
+                    ->whereKey($transaction->id)
+                    ->update([
+                        'status' => TransactionStatus::COMPLETED->value,
+                    ]);
+
+                return [
+                    'Success' => true,
+                    'OrderId' => 'attempt-concurrent-webhook',
+                    'Payments' => [
+                        [
+                            'PaymentId' => 123456,
+                            'Amount' => 100000,
+                            'Status' => 'AUTHORIZED',
+                            'Success' => true,
+                        ],
+                    ],
+                ];
+            });
+
+        $service = new TinkoffReconciliationService();
+
+        $this->expectException(PaymentException::class);
+        $this->expectExceptionMessage(
+            'Transaction changed during reconciliation'
+        );
+
+        $service->inspectSummary($transaction, $gateway);
+    }
+
+    public function test_inspect_summary_rejects_payment_id_changed_during_bank_request(): void
+    {
+        $customer = Customer::factory()->create();
+
+        $order = Order::factory()->create([
+            'customer_id' => $customer->id,
+            'payment_status' => 'pending',
+        ]);
+
+        $transaction = Transaction::factory()->create([
+            'order_id' => $order->id,
+            'customer_id' => $customer->id,
+            'gateway' => 'tinkoff',
+            'gateway_order_id' => 'attempt-payment-id-change',
+            'gateway_transaction_id' => '123456',
+            'amount' => '1000.00',
+            'status' => TransactionStatus::PROCESSING,
+        ]);
+
+        $gateway = Mockery::mock(TinkoffGateway::class);
+
+        $gateway->shouldReceive('checkOrderStatus')
+            ->once()
+            ->with('attempt-payment-id-change')
+            ->andReturnUsing(function () use ($transaction) {
+                Transaction::query()
+                    ->whereKey($transaction->id)
+                    ->update([
+                        'gateway_transaction_id' => '999999',
+                    ]);
+
+                return [
+                    'Success' => true,
+                    'OrderId' => 'attempt-payment-id-change',
+                    'Payments' => [
+                        [
+                            'PaymentId' => 123456,
+                            'Amount' => 100000,
+                            'Status' => 'AUTHORIZED',
+                            'Success' => true,
+                        ],
+                    ],
+                ];
+            });
+
+        $service = new TinkoffReconciliationService();
+
+        $this->expectException(PaymentException::class);
+
+        $service->inspectSummary($transaction, $gateway);
+    }
+
+    public function test_inspect_summary_rejects_transaction_deleted_during_bank_request(): void
+    {
+        $customer = Customer::factory()->create();
+
+        $order = Order::factory()->create([
+            'customer_id' => $customer->id,
+            'payment_status' => 'pending',
+        ]);
+
+        $transaction = Transaction::factory()->create([
+            'order_id' => $order->id,
+            'customer_id' => $customer->id,
+            'gateway' => 'tinkoff',
+            'gateway_order_id' => 'attempt-deleted',
+            'gateway_transaction_id' => '123456',
+            'amount' => '1000.00',
+            'status' => TransactionStatus::PROCESSING,
+        ]);
+
+        $gateway = Mockery::mock(TinkoffGateway::class);
+
+        $gateway->shouldReceive('checkOrderStatus')
+            ->once()
+            ->with('attempt-deleted')
+            ->andReturnUsing(function () use ($transaction) {
+                // Simulate deletion during the bank request.
+                Transaction::query()
+                    ->whereKey($transaction->id)
+                    ->delete();
+
+                return [
+                    'Success' => true,
+                    'OrderId' => 'attempt-deleted',
+                    'Payments' => [
+                        [
+                            'PaymentId' => 123456,
+                            'Amount' => 100000,
+                            'Status' => 'AUTHORIZED',
+                            'Success' => true,
+                        ],
+                    ],
+                ];
+            });
+
+        $service = new TinkoffReconciliationService();
+
+        $this->expectException(PaymentException::class);
+        $this->expectExceptionMessage(
+            'Transaction changed during reconciliation'
+        );
+
+        $service->inspectSummary($transaction, $gateway);
+    }
+
+    public function test_inspect_summary_uses_fresh_payment_id_instead_of_stale_model(): void
+    {
+        $customer = Customer::factory()->create();
+
+        $order = Order::factory()->create([
+            'customer_id' => $customer->id,
+            'payment_status' => 'pending',
+        ]);
+
+        $transaction = Transaction::factory()->create([
+            'order_id' => $order->id,
+            'customer_id' => $customer->id,
+            'gateway' => 'tinkoff',
+            'gateway_order_id' => 'attempt-stale-model',
+            'gateway_transaction_id' => '123456',
+            'amount' => '1000.00',
+            'status' => TransactionStatus::PROCESSING,
+        ]);
+
+        // Update the database without refreshing the Eloquent model.
+        Transaction::query()
+            ->whereKey($transaction->id)
+            ->update([
+                'gateway_transaction_id' => '999999',
+            ]);
+
+        $gateway = Mockery::mock(TinkoffGateway::class);
+
+        $gateway->shouldReceive('checkOrderStatus')
+            ->once()
+            ->with('attempt-stale-model')
+            ->andReturn([
+                'Success' => true,
+                'OrderId' => 'attempt-stale-model',
+                'Payments' => [
+                    [
+                        'PaymentId' => 999999,
+                        'Amount' => 100000,
+                        'Status' => 'AUTHORIZED',
+                        'Success' => true,
+                    ],
+                ],
+            ]);
+
+        $service = new TinkoffReconciliationService();
+
+        $result = $service->inspectSummary(
+            $transaction,
+            $gateway
+        );
+
+        $this->assertSame('999999', $result['payment_id']);
+        $this->assertSame('pending', $result['classification']);
+
+        $this->assertSame(
+            TransactionStatus::PROCESSING,
+            $transaction->fresh()->status
+        );
+    }
+
+    public function test_inspect_summary_rejects_amount_changed_during_bank_request(): void
+    {
+        $customer = Customer::factory()->create();
+
+        $order = Order::factory()->create([
+            'customer_id' => $customer->id,
+            'payment_status' => 'pending',
+        ]);
+
+        $transaction = Transaction::factory()->create([
+            'order_id' => $order->id,
+            'customer_id' => $customer->id,
+            'gateway' => 'tinkoff',
+            'gateway_order_id' => 'attempt-amount-change',
+            'gateway_transaction_id' => '123456',
+            'amount' => '1000.00',
+            'status' => TransactionStatus::PROCESSING,
+        ]);
+
+        $gateway = Mockery::mock(TinkoffGateway::class);
+
+        $gateway->shouldReceive('checkOrderStatus')
+            ->once()
+            ->with('attempt-amount-change')
+            ->andReturnUsing(function () use ($transaction) {
+                Transaction::query()
+                    ->whereKey($transaction->id)
+                    ->update([
+                        'amount' => '2000.00',
+                    ]);
+
+                return [
+                    'Success' => true,
+                    'OrderId' => 'attempt-amount-change',
+                    'Payments' => [
+                        [
+                            'PaymentId' => 123456,
+                            'Amount' => 100000,
+                            'Status' => 'AUTHORIZED',
+                        ],
+                    ],
+                ];
+            });
+
+        $service = new TinkoffReconciliationService();
+
+        $this->expectException(PaymentException::class);
+        $this->expectExceptionMessage(
+            'Transaction changed during reconciliation'
+        );
+
+        $service->inspectSummary($transaction, $gateway);
+    }
+
+    public function test_inspect_summary_rejects_order_changed_during_bank_request(): void
+    {
+        $customer = Customer::factory()->create();
+
+        $order = Order::factory()->create([
+            'customer_id' => $customer->id,
+            'payment_status' => 'pending',
+        ]);
+
+        $anotherOrder = Order::factory()->create([
+            'customer_id' => $customer->id,
+            'payment_status' => 'pending',
+        ]);
+
+        $transaction = Transaction::factory()->create([
+            'order_id' => $order->id,
+            'customer_id' => $customer->id,
+            'gateway' => 'tinkoff',
+            'gateway_order_id' => 'attempt-order-change',
+            'gateway_transaction_id' => '123456',
+            'amount' => '1000.00',
+            'status' => TransactionStatus::PROCESSING,
+        ]);
+
+        $gateway = Mockery::mock(TinkoffGateway::class);
+
+        $gateway->shouldReceive('checkOrderStatus')
+            ->once()
+            ->with('attempt-order-change')
+            ->andReturnUsing(function () use ($transaction, $anotherOrder) {
+                Transaction::query()
+                    ->whereKey($transaction->id)
+                    ->update([
+                        'order_id' => $anotherOrder->id,
+                    ]);
+
+                return [
+                    'Success' => true,
+                    'OrderId' => 'attempt-order-change',
+                    'Payments' => [
+                        [
+                            'PaymentId' => 123456,
+                            'Amount' => 100000,
+                            'Status' => 'AUTHORIZED',
+                        ],
+                    ],
+                ];
+            });
+
+        $service = new TinkoffReconciliationService();
+
+        $this->expectException(PaymentException::class);
+        $this->expectExceptionMessage(
+            'Transaction changed during reconciliation'
+        );
+
+        $service->inspectSummary($transaction, $gateway);
+    }
 }
